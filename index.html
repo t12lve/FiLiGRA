@@ -83,7 +83,7 @@
   <meta name="mobile-web-app-capable" content="yes">
 
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=1.1.2">
+  <link rel="stylesheet" href="style.css?v=1.2.0">
 
   <!-- FFmpeg.wasm & Util CDN Imports -->
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
@@ -567,6 +567,39 @@
             <span id="labelBtnExport">Exporter la Vidéo Filigranée</span>
           </button>
 
+          <!-- Encode queue + silent auto-save folder -->
+          <div class="queue-panel" id="queuePanel">
+            <div class="queue-panel-header">
+              <div>
+                <h3 class="queue-panel-title">File d’attente</h3>
+                <p class="queue-panel-desc">Enchaîne plusieurs vidéos avec le filigrane actuel</p>
+              </div>
+              <span class="queue-count-badge" id="queueCountBadge">0</span>
+            </div>
+            <div class="queue-actions">
+              <input type="file" id="queueFileInput" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" multiple hidden>
+              <button type="button" class="btn-queue-secondary" id="btnAddToQueue" title="Ajouter des vidéos à encoder à la suite">
+                + Vidéos
+              </button>
+              <button type="button" class="btn-queue-secondary" id="btnQueueCurrent" title="Ajouter la vidéo chargée à la file">
+                + Actuelle
+              </button>
+              <button type="button" class="btn-queue-primary" id="btnStartQueue" disabled>
+                Lancer la file
+              </button>
+              <button type="button" class="btn-queue-secondary" id="btnClearQueue" disabled>
+                Vider
+              </button>
+            </div>
+            <div class="queue-autosave">
+              <button type="button" class="btn-queue-secondary btn-queue-folder" id="btnPickExportDir" title="Une fois choisi, chaque export s’enregistre sans boîte de dialogue">
+                Dossier auto-save
+              </button>
+              <span class="queue-folder-label" id="exportDirLabel">Téléchargement navigateur</span>
+            </div>
+            <ul class="queue-list" id="queueList" aria-label="Vidéos en file d’attente"></ul>
+          </div>
+
           <!-- Progress Card -->
           <div class="progress-card">
             <div class="progress-header">
@@ -754,7 +787,7 @@
 
     <footer class="drawer-version-footer" aria-label="Version">
       <span class="drawer-version-name">FiLiGRA</span>
-      <span class="drawer-version-num" data-filigra-version>v1.1.2</span>
+      <span class="drawer-version-num" data-filigra-version>v1.2.0</span>
     </footer>
   </aside>
 
@@ -816,6 +849,6 @@
       });
     });
   </script>
-  <script type="module" src="app.js?v=1.1.2"></script>
+  <script type="module" src="app.js?v=1.2.0"></script>
 </body>
 </html>

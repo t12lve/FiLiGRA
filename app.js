@@ -121,6 +121,13 @@ const state = {
   lastExportUrl: null,
   lastExportFilename: "FiLiGRA_Export.mp4",
 
+  // Encode queue + silent folder save (File System Access)
+  encodeQueue: [],
+  queueRunning: false,
+  activeQueueJobId: null,
+  exportDirHandle: null,
+  autoDownload: true,
+
   // Mobile Navigation
   activeMobileDrawer: null,
 };
@@ -205,6 +212,15 @@ const els = {
   iconExportWasm: document.getElementById("iconExportWasm"),
   iconExportSpinner: document.getElementById("iconExportSpinner"),
   labelBtnExport: document.getElementById("labelBtnExport"),
+  queueFileInput: document.getElementById("queueFileInput"),
+  btnAddToQueue: document.getElementById("btnAddToQueue"),
+  btnQueueCurrent: document.getElementById("btnQueueCurrent"),
+  btnStartQueue: document.getElementById("btnStartQueue"),
+  btnClearQueue: document.getElementById("btnClearQueue"),
+  btnPickExportDir: document.getElementById("btnPickExportDir"),
+  exportDirLabel: document.getElementById("exportDirLabel"),
+  queueList: document.getElementById("queueList"),
+  queueCountBadge: document.getElementById("queueCountBadge"),
   progressStatusText: document.getElementById("progressStatusText"),
   progressDot: document.getElementById("progressDot"),
   progressPercent: document.getElementById("progressPercent"),
@@ -260,7 +276,9 @@ window.addEventListener("DOMContentLoaded", () => {
   initDisplayPreference();
   initDefaultWatermarkFallback();
   initWakeLock();
+  initExportDirPersistence();
   updatePredictiveWeight();
+  renderQueueList();
 
   ensureFFmpegDependencies()
     .then(() => {
@@ -678,8 +696,41 @@ function initEventListeners() {
   initCanvasPointerEvents();
 
   // Export Action
-  els.btnExportVideo.addEventListener("click", startFFmpegExport);
-  els.btnDownloadAgain.addEventListener("click", triggerDownload);
+  els.btnExportVideo.addEventListener("click", () => startFFmpegExport());
+  els.btnDownloadAgain.addEventListener("click", () => {
+    autoSaveOrDownload(state.lastExportBlob, state.lastExportFilename);
+  });
+
+  if (els.btnAddToQueue && els.queueFileInput) {
+    els.btnAddToQueue.addEventListener("click", () => els.queueFileInput.click());
+    els.queueFileInput.addEventListener("change", (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      enqueueVideoFiles(files);
+    });
+  }
+  if (els.btnQueueCurrent) {
+    els.btnQueueCurrent.addEventListener("click", () => {
+      if (!state.videoFile) {
+        showToast("Chargez d’abord une vidéo.");
+        return;
+      }
+      enqueueVideoFiles([state.videoFile]);
+    });
+  }
+  if (els.btnStartQueue) {
+    els.btnStartQueue.addEventListener("click", () => processEncodeQueue());
+  }
+  if (els.btnClearQueue) {
+    els.btnClearQueue.addEventListener("click", () => {
+      state.encodeQueue = state.encodeQueue.filter((j) => j.status === "running");
+      renderQueueList();
+      showToast("File vidée");
+    });
+  }
+  if (els.btnPickExportDir) {
+    els.btnPickExportDir.addEventListener("click", () => pickExportDirectory());
+  }
 
   // Console Accordion Toggle
   els.consoleHeader.addEventListener("click", () => {
@@ -913,10 +964,11 @@ function isVideoFile(file) {
   return /\.(mp4|mov|webm|mkv|m4v|avi|mpeg|mpg|ogv)$/i.test(file.name || "");
 }
 
-async function handleVideoFile(file) {
+async function handleVideoFile(file, options = {}) {
+  const silent = options.silent === true;
   if (!isVideoFile(file)) {
     showToast("Veuillez sélectionner un fichier vidéo valide (MP4, MOV, WebM, MKV).");
-    return;
+    return Promise.reject(new Error("invalid video"));
   }
 
   state.videoFile = file;
@@ -930,85 +982,93 @@ async function handleVideoFile(file) {
 
   appendLog(`[Vidéo] Fichier chargé : ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} Mo)`);
 
-  els.sourceVideo.onloadedmetadata = () => {
-    const w = els.sourceVideo.videoWidth || 1920;
-    const h = els.sourceVideo.videoHeight || 1080;
-    const dur = els.sourceVideo.duration || 1;
+  return new Promise((resolve, reject) => {
+    els.sourceVideo.onerror = () => reject(new Error("video load failed"));
+    els.sourceVideo.onloadedmetadata = () => {
+      const w = els.sourceVideo.videoWidth || 1920;
+      const h = els.sourceVideo.videoHeight || 1080;
+      const dur = els.sourceVideo.duration || 1;
 
-    state.videoMeta.width = w;
-    state.videoMeta.height = h;
-    state.videoMeta.duration = dur;
-    state.videoMeta.aspectRatioVal = w / h;
+      state.videoMeta.width = w;
+      state.videoMeta.height = h;
+      state.videoMeta.duration = dur;
+      state.videoMeta.aspectRatioVal = w / h;
 
-    // Calculate aspect ratio label (16:9, 9:16, 1:1, 4:3)
-    const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
-    const divisor = gcd(w, h);
-    const simplified = `${Math.round(w / divisor)}:${Math.round(h / divisor)}`;
-    state.videoMeta.aspectRatio = simplified;
+      const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+      const divisor = gcd(w, h);
+      const simplified = `${Math.round(w / divisor)}:${Math.round(h / divisor)}`;
+      state.videoMeta.aspectRatio = simplified;
 
-    // Set canvas dimensions to match video native resolution for pixel-perfect WYSIWYG
-    els.previewCanvas.width = w;
-    els.previewCanvas.height = h;
+      els.previewCanvas.width = w;
+      els.previewCanvas.height = h;
 
-    // Display metadata tags
-    els.chipResolution.innerHTML = `<strong>${w}×${h}</strong> (${simplified})`;
-    els.chipDuration.innerHTML = `<strong>${formatTime(dur)}</strong>`;
-    els.chipSize.innerHTML = `<strong>${(file.size / (1024 * 1024)).toFixed(1)} Mo</strong>`;
-    state.videoMeta.fps = 30;
-    updateFpsChip();
-    if (els.videoMetaChips) els.videoMetaChips.style.display = "flex";
+      els.chipResolution.innerHTML = `<strong>${w}×${h}</strong> (${simplified})`;
+      els.chipDuration.innerHTML = `<strong>${formatTime(dur)}</strong>`;
+      els.chipSize.innerHTML = `<strong>${(file.size / (1024 * 1024)).toFixed(1)} Mo</strong>`;
+      state.videoMeta.fps = 30;
+      updateFpsChip();
+      if (els.videoMetaChips) els.videoMetaChips.style.display = "flex";
 
-    // Setup Scrubber Range
-    els.videoScrubber.min = 0;
-    els.videoScrubber.max = dur;
-    els.videoScrubber.value = 0;
-    els.timecodeDisplay.textContent = `00:00 / ${formatTime(dur)}`;
+      els.videoScrubber.min = 0;
+      els.videoScrubber.max = dur;
+      els.videoScrubber.value = 0;
+      els.timecodeDisplay.textContent = `00:00 / ${formatTime(dur)}`;
 
-    // Reveal player interface
-    els.videoDropzone.style.display = "none";
-    els.canvasContainer.style.display = "flex";
-    els.stageControls.style.display = "flex";
-    if (els.overlayToolbar) els.overlayToolbar.style.display = "flex";
-    els.btnExportVideo.disabled = false;
+      els.videoDropzone.style.display = "none";
+      els.canvasContainer.style.display = "flex";
+      els.stageControls.style.display = "flex";
+      if (els.overlayToolbar) els.overlayToolbar.style.display = "flex";
+      els.btnExportVideo.disabled = state.isEncoding;
 
-    const seekPreview = () => {
-      try {
-        els.sourceVideo.pause();
-      } catch (_) {}
-      state.isPlaying = false;
-      if (els.iconPlay) els.iconPlay.style.display = "block";
-      if (els.iconPause) els.iconPause.style.display = "none";
-      els.sourceVideo.currentTime = 0.01;
-      els.sourceVideo.onseeked = () => {
-        renderCanvas();
+      const seekPreview = () => {
+        try {
+          els.sourceVideo.pause();
+        } catch (_) {}
+        state.isPlaying = false;
+        if (els.iconPlay) els.iconPlay.style.display = "block";
+        if (els.iconPause) els.iconPause.style.display = "none";
+        els.sourceVideo.currentTime = 0.01;
+        els.sourceVideo.onseeked = () => {
+          renderCanvas();
+        };
       };
-    };
 
-    // Detect source fps (rVFC) — refined again at export via FFmpeg probe
-    detectFpsFromElement(els.sourceVideo)
-      .then((fps) => {
-        if (!state.videoFile) return;
-        state.videoMeta.fps = fps;
-        updateFpsChip();
-        appendLog(`[Vidéo] Cadence source détectée : ${formatFpsLabel(fps)} fps`);
+      const finishSetup = () => {
+        if (state.watermarkLoaded) {
+          applyAdaptiveWatermarkScaling();
+        } else {
+          applyAnchor(state.watermarkState.anchor);
+        }
+        updateTargetResolution();
         updatePredictiveWeight();
-        seekPreview();
-      })
-      .catch(() => {
-        seekPreview();
-      });
+        if (!silent) {
+          showToast(`Vidéo importée : ${w}×${h} (${formatTime(dur)})`);
+        }
+        resolve();
+      };
 
-    // Recalibrate watermark scale if auto-adaptive sizing applies
-    if (state.watermarkLoaded) {
-      applyAdaptiveWatermarkScaling();
-    } else {
-      applyAnchor(state.watermarkState.anchor);
-    }
+      if (options.skipFpsDetect) {
+        seekPreview();
+        finishSetup();
+        return;
+      }
 
-    updateTargetResolution();
-    updatePredictiveWeight();
-    showToast(`Vidéo importée : ${w}×${h} (${formatTime(dur)})`);
-  };
+      detectFpsFromElement(els.sourceVideo)
+        .then((fps) => {
+          if (!state.videoFile) return;
+          state.videoMeta.fps = fps;
+          updateFpsChip();
+          appendLog(`[Vidéo] Cadence source détectée : ${formatFpsLabel(fps)} fps`);
+          updatePredictiveWeight();
+          seekPreview();
+          finishSetup();
+        })
+        .catch(() => {
+          seekPreview();
+          finishSetup();
+        });
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2270,7 +2330,292 @@ async function initFFmpeg() {
   }
 }
 
-async function startFFmpegExport() {
+// ---------------------------------------------------------------------------
+// Encode queue + silent folder save (File System Access API)
+// ---------------------------------------------------------------------------
+const EXPORT_DIR_IDB = "filigra-export-dir-v1";
+
+function openExportDirDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(EXPORT_DIR_IDB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("handles")) {
+        db.createObjectStore("handles");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSetExportDir(handle) {
+  const db = await openExportDirDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("handles", "readwrite");
+    tx.objectStore("handles").put(handle, "dir");
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGetExportDir() {
+  const db = await openExportDirDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("handles", "readonly");
+    const req = tx.objectStore("handles").get("dir");
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function initExportDirPersistence() {
+  if (!window.showDirectoryPicker) {
+    if (els.exportDirLabel) {
+      els.exportDirLabel.textContent = "Auto-save dossier : Chrome / Edge / PWA";
+    }
+    if (els.btnPickExportDir) els.btnPickExportDir.disabled = true;
+    return;
+  }
+  try {
+    const handle = await idbGetExportDir();
+    if (!handle) return;
+    const perm = await handle.queryPermission({ mode: "readwrite" });
+    if (perm === "granted") {
+      state.exportDirHandle = handle;
+      updateExportDirLabel();
+      appendLog(`[Auto-save] Dossier restauré : ${handle.name}`);
+    }
+  } catch (err) {
+    console.warn("[FiLiGRA] export dir restore:", err);
+  }
+}
+
+function updateExportDirLabel() {
+  if (!els.exportDirLabel) return;
+  if (state.exportDirHandle) {
+    els.exportDirLabel.textContent = `Dossier : ${state.exportDirHandle.name} (sans confirmation)`;
+    els.exportDirLabel.classList.add("is-ready");
+  } else {
+    els.exportDirLabel.textContent = "Téléchargement navigateur";
+    els.exportDirLabel.classList.remove("is-ready");
+  }
+}
+
+async function pickExportDirectory() {
+  if (!window.showDirectoryPicker) {
+    showToast("Choix de dossier non supporté — utilisez Chrome, Edge ou la PWA.");
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    const perm = await handle.requestPermission({ mode: "readwrite" });
+    if (perm !== "granted") {
+      showToast("Permission dossier refusée.");
+      return;
+    }
+    state.exportDirHandle = handle;
+    await idbSetExportDir(handle);
+    updateExportDirLabel();
+    showToast(`Auto-save activé → ${handle.name}`);
+    appendLog(`[Auto-save] Dossier choisi : ${handle.name}`);
+  } catch (err) {
+    if (err && err.name === "AbortError") return;
+    console.warn(err);
+    showToast("Impossible d’ouvrir le dossier.");
+  }
+}
+
+async function ensureExportDirPermission() {
+  const handle = state.exportDirHandle;
+  if (!handle) return false;
+  try {
+    let perm = await handle.queryPermission({ mode: "readwrite" });
+    if (perm === "granted") return true;
+    perm = await handle.requestPermission({ mode: "readwrite" });
+    return perm === "granted";
+  } catch (_) {
+    return false;
+  }
+}
+
+async function writeBlobToExportDir(blob, filename) {
+  if (!(await ensureExportDirPermission())) return false;
+  const safeName = String(filename || "FiLiGRA_Export.mp4").replace(/[\\/:*?"<>|]/g, "_");
+  const fileHandle = await state.exportDirHandle.getFileHandle(safeName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+  return true;
+}
+
+async function autoSaveOrDownload(blob, filename) {
+  if (!blob) {
+    triggerDownload();
+    return;
+  }
+  try {
+    if (state.exportDirHandle && (await writeBlobToExportDir(blob, filename))) {
+      showToast(`Enregistré : ${filename}`);
+      appendLog(`[Auto-save] Écrit sans confirmation → ${filename}`);
+      return;
+    }
+  } catch (err) {
+    console.warn("[FiLiGRA] auto-save:", err);
+    appendLog(`[Auto-save] Échec dossier — fallback téléchargement (${err.message || err})`);
+  }
+  if (state.lastExportUrl) URL.revokeObjectURL(state.lastExportUrl);
+  state.lastExportUrl = URL.createObjectURL(blob);
+  state.lastExportBlob = blob;
+  state.lastExportFilename = filename;
+  triggerDownload();
+}
+
+function snapshotForQueue() {
+  return {
+    watermarkState: JSON.parse(JSON.stringify(state.watermarkState)),
+    exportSettings: JSON.parse(JSON.stringify(state.exportSettings)),
+  };
+}
+
+function enqueueVideoFiles(files) {
+  const vids = (files || []).filter(isVideoFile);
+  if (!vids.length) {
+    showToast("Aucun fichier vidéo valide.");
+    return;
+  }
+  if (!state.watermarkLoaded) {
+    showToast("Importez d’abord un filigrane PNG.");
+    return;
+  }
+  if (state.videoFile) {
+    try {
+      updateTargetResolution();
+    } catch (_) {}
+  }
+  const snap = snapshotForQueue();
+  let added = 0;
+  for (const file of vids) {
+    state.encodeQueue.push({
+      id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      videoFile: file,
+      name: file.name,
+      watermarkState: snap.watermarkState,
+      exportSettings: snap.exportSettings,
+      status: "pending",
+    });
+    added++;
+  }
+  renderQueueList();
+  showToast(`${added} vidéo${added > 1 ? "s" : ""} ajoutée${added > 1 ? "s" : ""} à la file`);
+  appendLog(`[File] +${added} — total ${state.encodeQueue.filter((j) => j.status === "pending").length} en attente`);
+}
+
+function renderQueueList() {
+  if (!els.queueList) return;
+  const pending = state.encodeQueue.filter((j) => j.status === "pending").length;
+  const running = state.encodeQueue.some((j) => j.status === "running");
+  if (els.queueCountBadge) els.queueCountBadge.textContent = String(pending + (running ? 1 : 0));
+  if (els.btnStartQueue) {
+    els.btnStartQueue.disabled = pending === 0 || state.isEncoding || state.queueRunning;
+  }
+  if (els.btnClearQueue) {
+    els.btnClearQueue.disabled = !state.encodeQueue.some((j) => j.status !== "running");
+  }
+
+  els.queueList.innerHTML = "";
+  state.encodeQueue.forEach((job) => {
+    if (job.status === "done") return;
+    const li = document.createElement("li");
+    li.className = `queue-item is-${job.status}`;
+    const statusLabel =
+      job.status === "pending"
+        ? "attente"
+        : job.status === "running"
+          ? "encodage"
+          : job.status === "error"
+            ? "erreur"
+            : job.status;
+    const safeName = job.name.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    li.innerHTML = `
+      <span class="queue-item-name" title="${safeName}">${safeName}</span>
+      <span class="queue-item-status">${statusLabel}</span>
+      ${
+        job.status === "pending"
+          ? `<button type="button" class="queue-item-remove" data-remove="${job.id}" aria-label="Retirer">×</button>`
+          : ""
+      }
+    `;
+    els.queueList.appendChild(li);
+  });
+
+  els.queueList.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-remove");
+      state.encodeQueue = state.encodeQueue.filter((j) => j.id !== id);
+      renderQueueList();
+    });
+  });
+}
+
+async function processEncodeQueue() {
+  if (state.isEncoding || state.queueRunning) return;
+  const next = state.encodeQueue.find((j) => j.status === "pending");
+  if (!next) {
+    state.queueRunning = false;
+    state.activeQueueJobId = null;
+    renderQueueList();
+    showToast("File d’attente terminée");
+    return;
+  }
+
+  state.queueRunning = true;
+  state.activeQueueJobId = next.id;
+  next.status = "running";
+  renderQueueList();
+  appendLog(`[File] Encodage → ${next.name}`);
+
+  try {
+    Object.assign(state.watermarkState, JSON.parse(JSON.stringify(next.watermarkState)));
+    Object.assign(state.exportSettings, JSON.parse(JSON.stringify(next.exportSettings)));
+    if (els.sliderScale) {
+      els.sliderScale.value = Math.round(state.watermarkState.scale * 100);
+      els.valScale.textContent = `${Math.round(state.watermarkState.scale * 100)}%`;
+    }
+    if (els.sliderOpacity) {
+      els.sliderOpacity.value = Math.round(state.watermarkState.opacity * 100);
+      els.valOpacity.textContent = `${Math.round(state.watermarkState.opacity * 100)}%`;
+    }
+    if (els.sliderRotation) {
+      els.sliderRotation.value = state.watermarkState.rotation || 0;
+      els.valRotation.textContent = `${state.watermarkState.rotation || 0}°`;
+    }
+
+    await handleVideoFile(next.videoFile, { silent: true, skipFpsDetect: true });
+    if (next.exportSettings.targetWidth > 0 && next.exportSettings.targetHeight > 0) {
+      state.exportSettings.targetWidth = next.exportSettings.targetWidth;
+      state.exportSettings.targetHeight = next.exportSettings.targetHeight;
+      if (els.previewCanvas) {
+        els.previewCanvas.width = state.exportSettings.targetWidth;
+        els.previewCanvas.height = state.exportSettings.targetHeight;
+        clampWatermarkPosition();
+        renderCanvas();
+      }
+    }
+
+    await startFFmpegExport({ fromQueue: true, jobId: next.id });
+  } catch (err) {
+    next.status = "error";
+    state.queueRunning = false;
+    state.activeQueueJobId = null;
+    appendLog(`[File] Erreur ${next.name}: ${err.message || err}`);
+    renderQueueList();
+    showToast(`Erreur file : ${next.name}`);
+    setTimeout(() => processEncodeQueue(), 400);
+  }
+}
+
+async function startFFmpegExport(options = {}) {
   if (!state.videoFile) {
     showToast("Veuillez d'abord sélectionner une vidéo source.");
     return;
@@ -2281,6 +2626,7 @@ async function startFFmpegExport() {
   setExportingButtonState(true);
   els.successBanner.classList.remove("visible");
   updateProgressUI(0, "Préparation du pipeline...");
+  renderQueueList();
 
   state.encodingStartTime = Date.now();
   startElapsedTimer();
@@ -2438,20 +2784,38 @@ async function startFFmpegExport() {
       console.warn("[FFmpeg] Avertissement nettoyage:", cleanErr);
     }
 
-    // 8. Auto download and reveal success banner
-    triggerDownload();
+    // 8. Auto-save (dossier sans confirmation) ou téléchargement navigateur immédiat
+    await autoSaveOrDownload(outputBlob, state.lastExportFilename);
     els.successBanner.classList.add("visible");
-    showToast("Vidéo exportée et téléchargée avec succès !");
+    showToast("Vidéo exportée avec succès !");
+
+    if (options.fromQueue && options.jobId) {
+      const job = state.encodeQueue.find((j) => j.id === options.jobId);
+      if (job) job.status = "done";
+    }
   } catch (error) {
     console.error("[FFmpeg Erreur]", error);
     appendLog(`[Erreur Fatale] ${error.message}`);
     updateProgressUI(0, `Erreur : ${error.message}`);
     els.statStage.textContent = "Échec";
     showToast(`Erreur d'encodage : ${error.message}`, 5000);
+    if (options.fromQueue && options.jobId) {
+      const job = state.encodeQueue.find((j) => j.id === options.jobId);
+      if (job) job.status = "error";
+    }
   } finally {
     state.isEncoding = false;
     setExportingButtonState(false);
     stopElapsedTimer();
+    renderQueueList();
+
+    if (options.fromQueue) {
+      state.activeQueueJobId = null;
+      setTimeout(() => {
+        state.queueRunning = false;
+        processEncodeQueue();
+      }, 350);
+    }
   }
 }
 
