@@ -1,0 +1,21 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+.idea/
+.vscode/
+*.log
+
+# Local / temp
+_*.py
+*.tmp
+.env
+.env.*
+
+# Large design sources (keep exported PNG)
+*.ai
+
+# Optional local caches
+.cache/
+node_modules/

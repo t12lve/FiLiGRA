@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <!-- 1. Cross-Origin Isolation + PWA shell (registers sw.js) -->
+  <script>
+    window.coi = {
+      // Register our combined SW (COI headers + shell cache)
+    };
+  </script>
+  <script src="pwa-boot.js"></script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" id="viewportMeta" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <script>
+    // Applied before first paint so the desktop override never flashes the mobile layout.
+    try {
+      if (localStorage.getItem("filigra:force-desktop") === "1") {
+        document.getElementById("viewportMeta").setAttribute("content", "width=1280");
+      }
+    } catch (e) {}
+  </script>
+  <title>FiLiGRA — Watermark & Transcode Studio (PWA)</title>
+  
+  <!-- SEO & Search Engine Optimization -->
+  <meta name="description" content="FiLiGRA — Progressive Web App client-side d'incrustation de filigrane, détection de zones sûres pour TikTok, Reels, Shorts et encodage vidéo MP4 H.264 via WebAssembly sans aucun serveur.">
+  <meta name="keywords" content="FiLiGRA, watermark, filigrane vidéo, transcodage, WebAssembly, FFmpeg wasm, safe zone tiktok, reels instagram, youtube shorts, PWA, privacy-first, T12lve">
+  <meta name="author" content="T12lve">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://t12lve.github.io/FiLiGRA/">
+  <meta name="theme-color" content="#071018">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FiLiGRA">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://t12lve.github.io/FiLiGRA/">
+  <meta property="og:title" content="FiLiGRA — Watermark & Transcode Studio">
+  <meta property="og:description" content="Studio vidéo 100% Client-Side WebAssembly. Incrustation de filigrane interactive avec repères UI réseaux sociaux et transcodage ultra-rapide sans serveur.">
+  <meta property="og:image" content="https://t12lve.github.io/FiLiGRA/filigra_logo.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://t12lve.github.io/FiLiGRA/">
+  <meta name="twitter:title" content="FiLiGRA — Watermark & Transcode Studio">
+  <meta name="twitter:description" content="Studio vidéo 100% Client-Side WebAssembly. Conçu par T12lve.">
+  <meta name="twitter:image" content="https://t12lve.github.io/FiLiGRA/filigra_logo.png">
+
+  <!-- Schema.org JSON-LD Structured Data for Google -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "FiLiGRA Studio",
+    "url": "https://t12lve.github.io/FiLiGRA/",
+    "description": "Progressive Web App client-side d'incrustation de filigrane vidéo et de transcodage local par WebAssembly sans aucun backend.",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "All",
+    "browserRequirements": "Requires WebAssembly and SharedArrayBuffer support",
+    "author": {
+      "@type": "Person",
+      "name": "T12lve",
+      "url": "https://instagram.com/t12lve"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "EUR"
+    }
+  }
+  </script>
+
+  <!-- PWA Manifest & Icons -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- FFmpeg.wasm & Util CDN Imports -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+</head>
+<body>
+
+  <div class="app-container">
+    <!-- Header Section -->
+    <header class="app-header">
+      <div class="brand-wrapper">
+        <div class="brand-logo-standalone">
+          <img src="filigra_logo.png" alt="FiLiGRA" class="brand-logo-img">
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button type="button" class="btn-burger" id="btnBurgerMenu" aria-label="Ouvrir le menu" title="Menu" aria-expanded="false" aria-controls="burgerDrawer">
+          <span class="burger-bar"></span>
+          <span class="burger-bar"></span>
+          <span class="burger-bar"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Bento Grid -->
+    <main class="bento-grid">
+
+      <!-- Bento 1: Video Stage & Canvas WYSIWYG -->
+      <section class="bento-card col-video-stage" aria-label="Zone de prévisualisation et éditeur interactif">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="card-title">Aperçu Vidéo & Éditeur WYSIWYG</h2>
+              <p class="card-subtitle">Glissez ou touchez l'écran pour repositionner le watermark en direct</p>
+            </div>
+          </div>
+          <div class="video-meta-tags" id="videoMetaChips" style="display: none;">
+            <span class="meta-chip" id="chipResolution">--x--</span>
+            <span class="meta-chip" id="chipDuration">--:--</span>
+            <span class="meta-chip" id="chipSize">-- Mo</span>
+          </div>
+        </div>
+
+        <!-- Overlay Safe-Zone Toolbar (compact stage controls) -->
+        <div class="overlay-toolbar" id="overlayToolbar" style="display: none;">
+          <div class="overlay-selector-group">
+            <span class="overlay-toolbar-label">Guides UI</span>
+            <div class="overlay-pills overlay-pills-scroll">
+              <button type="button" class="btn-overlay-pill active" data-overlay="none">Aucun</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="tiktok">TikTok</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="shorts">Shorts</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="reels">Reels</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="twitter">X</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="universal">Universel</button>
+            </div>
+          </div>
+          <div class="overlay-status-badge" id="overlaySafeStatus" style="display: none;">
+            <span class="indicator-dot"></span>
+            <span id="overlaySafeText">Zone Sûre</span>
+          </div>
+        </div>
+
+        <!-- Video Player & Canvas Stage Wrapper -->
+        <div class="stage-wrapper" id="stageWrapper">
+          <!-- Dropzone state when no video loaded -->
+          <div class="dropzone-overlay" id="videoDropzone">
+            <div class="dropzone-icon-circle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <div class="dropzone-text">
+              <h3>Glissez-déposez votre vidéo ici</h3>
+              <p>Prend en charge MP4, MOV, WebM, MKV jusqu'en 4K</p>
+              <button type="button" class="btn-browse" id="btnBrowseVideo">Parcourir les fichiers</button>
+            </div>
+          </div>
+
+          <!-- Hidden HTML5 Video element for decoding frames -->
+          <video id="sourceVideo" playsinline preload="auto" crossorigin="anonymous"></video>
+          <input type="file" id="videoFileInput" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" style="display: none;">
+
+          <!-- Interactive WYSIWYG Canvas -->
+          <div class="canvas-container" id="canvasContainer" style="display: none;">
+            <canvas id="previewCanvas" width="1280" height="720"></canvas>
+          </div>
+        </div>
+
+        <!-- Stage Timeline Scrubber & Controls -->
+        <div class="stage-controls" id="stageControls" style="display: none;">
+          <div class="scrubber-row">
+            <div class="scrubber-slider-wrapper">
+              <input type="range" id="videoScrubber" min="0" max="100" step="0.05" value="0" aria-label="Curseur temporel de la vidéo">
+            </div>
+            <div class="timecode-display" id="timecodeDisplay">00:00 / 00:00</div>
+          </div>
+
+          <div class="playback-buttons">
+            <div class="playback-controls-group">
+              <button type="button" class="btn-ctrl" id="btnStepBack" title="Reculer d'une frame (-1s)" aria-label="Reculer d'une frame">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="11 19 2 12 11 5"/><polyline points="22 19 13 12 22 5"/></svg>
+                -1s
+              </button>
+              <button type="button" class="btn-ctrl btn-primary-ctrl" id="btnPlayPause" aria-label="Lire ou mettre en pause">
+                <svg id="iconPlay" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <svg id="iconPause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                <span id="labelPlay">Lire</span>
+              </button>
+              <button type="button" class="btn-ctrl" id="btnStepForward" title="Avancer d'une frame (+1s)" aria-label="Avancer d'une frame">
+                +1s
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="13 19 22 12 13 5"/><polyline points="2 19 11 12 2 5"/></svg>
+              </button>
+            </div>
+
+            <div class="playback-controls-group">
+              <button type="button" class="btn-ctrl" id="btnResetWmPos" title="Réinitialiser la position du watermark">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                Centrer
+              </button>
+              <button type="button" class="btn-ctrl" id="btnChangeVideo" title="Remplacer la vidéo source">
+                Changer de vidéo
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bento 2: Watermark Studio -->
+      <section class="bento-card col-watermark-studio" id="cardWatermarkStudio" aria-label="Gestionnaire de filigrane">
+        <div class="mobile-drawer-header">
+          <div class="drawer-drag-pill"></div>
+          <button type="button" class="btn-drawer-close" aria-label="Fermer" data-close-drawer>✕</button>
+        </div>
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="card-title">Filigrane (PNG)</h2>
+              <p class="card-subtitle">Logo transparent & incrustation</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="wm-studio-content">
+          <!-- Guides UI (tools, not help) -->
+          <div class="wm-guides-block">
+            <div class="control-group-title">
+              <span>Guides UI réseaux</span>
+              <span style="font-size: 0.7rem; font-weight: normal; color: var(--text-muted);">Repères indicatifs</span>
+            </div>
+            <div class="overlay-pills overlay-pills-scroll">
+              <button type="button" class="btn-overlay-pill active" data-overlay="none">Aucun</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="tiktok">TikTok</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="shorts">Shorts</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="reels">Reels</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="twitter">X</button>
+              <button type="button" class="btn-overlay-pill" data-overlay="universal">Universel</button>
+            </div>
+            <label class="toggle-option-label" for="chkBurnOverlay">
+              <input type="checkbox" id="chkBurnOverlay" class="checkbox-custom">
+              <span class="checkbox-custom-ui"></span>
+              <span class="toggle-option-title">Graver les repères dans l'export</span>
+            </label>
+          </div>
+
+          <!-- Watermark Ingestion Dropzone -->
+          <div class="wm-dropzone" id="wmDropzone">
+            <div class="wm-thumb-box" id="wmThumbBox">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <div class="wm-drop-info">
+              <h4 id="wmFileName">Importer un logo PNG</h4>
+              <p id="wmMetaText">Transparence alpha recommandée</p>
+            </div>
+          </div>
+          <input type="file" id="wmFileInput" accept="image/png,image/webp,image/svg+xml" style="display: none;">
+
+          <!-- Auto-Adaptive Sizing Badge -->
+          <div class="auto-scale-badge" id="autoScaleBadge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span>Taille du filigrane ajustée automatiquement</span>
+          </div>
+
+          <!-- Quick Anchor Buttons -->
+          <div>
+            <div class="control-group-title">
+              <span>Ancrage Rapide</span>
+              <span style="font-size: 0.7rem; font-weight: normal; color: var(--text-muted);">Coins & Centre</span>
+            </div>
+            <div class="anchor-grid">
+              <button type="button" class="btn-anchor" data-anchor="top-left" title="Haut Gauche" aria-label="Ancrer en haut à gauche">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" fill="currentColor"/></svg>
+                H-G
+              </button>
+              <button type="button" class="btn-anchor" data-anchor="top-right" title="Haut Droite" aria-label="Ancrer en haut à droite">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="14" y="3" width="7" height="7" fill="currentColor"/></svg>
+                H-D
+              </button>
+              <button type="button" class="btn-anchor" data-anchor="center" title="Centre" aria-label="Ancrer au centre">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8.5" y="8.5" width="7" height="7" fill="currentColor"/></svg>
+                CTR
+              </button>
+              <button type="button" class="btn-anchor" data-anchor="bottom-left" title="Bas Gauche" aria-label="Ancrer en bas à gauche">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="14" width="7" height="7" fill="currentColor"/></svg>
+                B-G
+              </button>
+              <button type="button" class="btn-anchor active" data-anchor="bottom-right" title="Bas Droite" aria-label="Ancrer en bas à droite">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="14" y="14" width="7" height="7" fill="currentColor"/></svg>
+                B-D
+              </button>
+            </div>
+            <button type="button" class="btn-snap-safe" id="btnSnapSafeZone" title="Positionner automatiquement le filigrane dans la zone dégagée des boutons sociaux">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              <span>Éviter les boutons UI (Zone sûre)</span>
+            </button>
+          </div>
+
+          <!-- Sliders Stack -->
+          <div class="sliders-stack">
+            <!-- Scale Slider -->
+            <div class="slider-row">
+              <div class="slider-header">
+                <span>Échelle relative</span>
+                <span class="slider-value" id="valScale">18%</span>
+              </div>
+              <input type="range" id="sliderScale" min="5" max="80" step="1" value="18" aria-label="Échelle du watermark en pourcentage de la largeur vidéo">
+            </div>
+
+            <!-- Opacity Slider -->
+            <div class="slider-row">
+              <div class="slider-header">
+                <span>Opacité</span>
+                <span class="slider-value" id="valOpacity">85%</span>
+              </div>
+              <input type="range" id="sliderOpacity" min="5" max="100" step="1" value="85" aria-label="Opacité du filigrane">
+            </div>
+
+            <!-- Margin / Padding Slider -->
+            <div class="slider-row">
+              <div class="slider-header">
+                <span>Marge du bord</span>
+                <span class="slider-value" id="valMargin">4%</span>
+              </div>
+              <input type="range" id="sliderMargin" min="0" max="15" step="0.5" value="4" aria-label="Marge d'ancrage du filigrane">
+            </div>
+
+            <!-- Rotation Slider -->
+            <div class="slider-row">
+              <div class="slider-header">
+                <span>Rotation</span>
+                <span class="slider-value" id="valRotation">0°</span>
+              </div>
+              <input type="range" id="sliderRotation" min="0" max="360" step="5" value="0" aria-label="Rotation du filigrane en degrés">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bento 3: Export Settings & Predictive Weight Calculator -->
+      <section class="bento-card col-export-settings" id="cardExportSettings" aria-label="Paramètres d'encodage et prédiction du poids">
+        <div class="mobile-drawer-header">
+          <div class="drawer-drag-pill"></div>
+          <button type="button" class="btn-drawer-close" aria-label="Fermer" data-close-drawer>✕</button>
+        </div>
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="card-title">Paramètres d'Export & Poids</h2>
+              <p class="card-subtitle">Résolution cible, codec H.264 & estimation</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="export-settings-content">
+          <!-- Resolution Presets -->
+          <div>
+            <div class="control-group-title">
+              <span>Formats Sociaux (Combinés)</span>
+              <span id="targetResBadge" style="color: #c084fc; font-family: 'JetBrains Mono', monospace; font-size: 0.74rem;">Original</span>
+            </div>
+            <div class="presets-grid social-presets-grid combined-presets-grid">
+              <!-- Combined 9:16 Vertical Preset: TikTok + YouTube Shorts + Instagram Reels -->
+              <button type="button" class="btn-preset" data-preset="vertical-9-16" title="Format vertical universel 9:16 (Shorts, Reels, TikTok)">
+                <div class="preset-icons-row">
+                  <span class="icon-svg-badge tag-tiktok" title="TikTok">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19.589 6.686a4.793 4.793 0 0 1-3.77-4.245V2h-3.445v13.672a2.896 2.896 0 0 1-2.891 2.891 2.896 2.896 0 0 1-2.892-2.891 2.896 2.896 0 0 1 2.892-2.892c.307 0 .602.052.879.143V9.458a6.326 6.326 0 0 0-.879-.062 6.344 6.344 0 0 0-6.337 6.336 6.344 6.344 0 0 0 6.337 6.338 6.344 6.344 0 0 0 6.336-6.338V9.034a8.214 8.214 0 0 0 4.77 1.517V7.106a4.832 4.832 0 0 1-1.007-.42z"/></svg>
+                  </span>
+                  <span class="icon-svg-badge tag-shorts" title="YouTube Shorts">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.77 10.32l-1.2-.5a3.9 3.9 0 0 0-5.18-1.54l-3.23 1.9a3.9 3.9 0 0 0-1.54 5.18 3.9 3.9 0 0 0 5.18 1.54l1.2.5a3.9 3.9 0 0 0 5.18-1.54l3.23-1.9a3.9 3.9 0 0 0 1.54-5.18 3.9 3.9 0 0 0-5.18-1.54zm-7.27 4.18V9.5l4.5 2.5-4.5 2.5z"/></svg>
+                  </span>
+                  <span class="icon-svg-badge tag-reels" title="Instagram Reels">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="18" cy="6" r="1" fill="currentColor"/></svg>
+                  </span>
+                </div>
+                <span class="preset-name">9:16 Vertical</span>
+                <span class="preset-res">1080×1920 • Shorts, Reels, TikTok</span>
+              </button>
+
+              <!-- Combined 4:5 Portrait Preset: Instagram Feed + Twitter / X -->
+              <button type="button" class="btn-preset" data-preset="portrait-4-5" title="Format portrait feed 4:5 (Instagram & Twitter / X)">
+                <div class="preset-icons-row">
+                  <span class="icon-svg-badge tag-insta" title="Instagram Feed">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="18" cy="6" r="1" fill="currentColor"/></svg>
+                  </span>
+                  <span class="icon-svg-badge tag-twitter" title="Twitter / X">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                  </span>
+                </div>
+                <span class="preset-name">4:5 Portrait</span>
+                <span class="preset-res">1080×1350 • Instagram & X</span>
+              </button>
+
+              <!-- Square 1:1 Preset -->
+              <button type="button" class="btn-preset" data-preset="square-1-1" title="Format carré 1:1 universel">
+                <div class="preset-icons-row">
+                  <span class="icon-svg-badge tag-square" title="Carré 1:1">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/></svg>
+                  </span>
+                </div>
+                <span class="preset-name">1:1 Carré</span>
+                <span class="preset-res">1080×1080 • Post universel</span>
+              </button>
+            </div>
+
+            <div class="control-group-title" style="margin-top: 14px;">
+              <span>Formats Standards & Paysage</span>
+              <span style="font-size: 0.7rem; color: var(--text-muted);">Source & 16:9</span>
+            </div>
+            <div class="presets-grid standard-presets-grid">
+              <button type="button" class="btn-preset active" data-preset="original">
+                <div class="preset-icons-row">
+                  <span class="icon-svg-badge tag-standard"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+                </div>
+                <span class="preset-name">Original</span>
+                <span class="preset-res">100% Source</span>
+              </button>
+              <button type="button" class="btn-preset" data-preset="1080p">
+                <div class="preset-icons-row">
+                  <span class="icon-svg-badge tag-standard"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>
+                </div>
+                <span class="preset-name">1080p FHD</span>
+                <span class="preset-res">1920×1080</span>
+              </button>
+              <button type="button" class="btn-preset" data-preset="720p">
+                <div class="preset-icons-row">
+                  <span class="icon-svg-badge tag-standard"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>
+                </div>
+                <span class="preset-name">720p HD</span>
+                <span class="preset-res">1280×720</span>
+              </button>
+              <button type="button" class="btn-preset" data-preset="480p">
+                <div class="preset-icons-row">
+                  <span class="icon-svg-badge tag-standard"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>
+                </div>
+                <span class="preset-name">480p SD</span>
+                <span class="preset-res">854×480</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Fit / Crop Framing Mode -->
+          <div class="fit-mode-wrapper" id="fitModeWrapper">
+            <div class="fit-mode-header">
+              <span>Cadrage du format</span>
+              <span id="fitModeLabel" style="color: var(--text-lavender); font-weight: 600; font-size: 0.76rem;">Remplir (Plein écran)</span>
+            </div>
+            <div class="fit-mode-toggle">
+              <button type="button" class="btn-fit-mode active" data-fit="crop" title="Agrandit et recadre au centre pour remplir tout l'écran vertical">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>
+                Remplir (Plein écran)
+              </button>
+              <button type="button" class="btn-fit-mode" data-fit="pad" title="Conserve toute la vidéo avec des bandes noires haut/bas">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="8" x2="22" y2="8"/><line x1="2" y1="16" x2="22" y2="16"/></svg>
+                Ajuster (Bandes noires)
+              </button>
+            </div>
+          </div>
+
+          <!-- Quality CRF Slider -->
+          <div class="quality-card">
+            <div class="slider-header">
+              <span style="font-weight: 600; color: var(--text-lavender);">Facteur de Qualité (CRF)</span>
+              <span class="slider-value" id="valCrf">23 (Équilibré)</span>
+            </div>
+            <input type="range" id="sliderCrf" min="18" max="32" step="1" value="23" aria-label="Curseur CRF de compression">
+            <div class="quality-labels">
+              <span>18 — Sans perte visuelle</span>
+              <span>23 — Optimal</span>
+              <span>32 — Forte compression</span>
+            </div>
+          </div>
+
+          <!-- Predictive Weight Bento Box -->
+          <div class="predictive-weight-card">
+            <div class="weight-header">
+              <div class="weight-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                </svg>
+                Calculateur Prédictif de Poids
+              </div>
+              <span class="weight-badge-diff" id="weightDiffBadge">Estimation en direct</span>
+            </div>
+
+            <div class="weight-display">
+              <span class="weight-value" id="weightEstimatedValue">~0.0 Mo</span>
+              <span class="source-compare" id="weightSourceCompare">(Taille source : 0.0 Mo)</span>
+            </div>
+
+            <div class="weight-bar-track">
+              <div class="weight-bar-fill" id="weightBarFill"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bento 4: FFmpeg Pipeline Action & Live Console -->
+      <section class="bento-card col-pipeline-action" id="cardPipelineAction" aria-label="Lancement du transcodage et suivi">
+        <div class="mobile-drawer-header">
+          <div class="drawer-drag-pill"></div>
+          <button type="button" class="btn-drawer-close" aria-label="Fermer" data-close-drawer>✕</button>
+        </div>
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"/>
+                <line x1="12" y1="19" x2="20" y2="19"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="card-title">Pipeline FFmpeg & Export</h2>
+              <p class="card-subtitle">Encodage H.264 logiciel (WebAssembly), sur votre processeur</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-content">
+          <!-- Big CTA Button -->
+          <button type="button" class="btn-cta-export" id="btnExportVideo" disabled>
+            <svg id="iconExportWasm" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <svg id="iconExportSpinner" class="spinning" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display: none;">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25"/>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor"/>
+            </svg>
+            <span id="labelBtnExport">Exporter la Vidéo Filigranée</span>
+          </button>
+
+          <!-- Progress Card -->
+          <div class="progress-card">
+            <div class="progress-header">
+              <span class="progress-status-text" id="progressStatusText">
+                <span class="indicator-dot" id="progressDot"></span>
+                En attente d'une vidéo
+              </span>
+              <span class="progress-percentage" id="progressPercent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="pipeline-stats-row">
+              <span id="statTimeElapsed">Temps : 00:00</span>
+              <span id="statFpsSpeed">Vitesse : --</span>
+              <span id="statStage">Prêt</span>
+            </div>
+          </div>
+
+          <!-- Success Download Banner -->
+          <div class="success-banner" id="successBanner">
+            <div class="success-info">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              <span>Vidéo encodée avec succès !</span>
+            </div>
+            <button type="button" class="btn-download-again" id="btnDownloadAgain">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Re-télécharger
+            </button>
+          </div>
+
+          <!-- Live Terminal / Logs Console Accordion -->
+          <div class="console-accordion">
+            <div class="console-header" id="consoleHeader" title="Afficher ou masquer les logs FFmpeg">
+              <span class="console-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                Console FFmpeg.wasm (<span id="logCount">0</span> logs)
+              </span>
+              <svg id="iconChevronConsole" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="console-body" id="consoleBody" style="display: none;">
+              <div class="console-log-line" style="color: #64748b;">[FiLiGRA] Studio prêt. Importez une vidéo pour commencer.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Diagnostics discrets : isolation COOP/COEP (multi-threads) & confidentialité -->
+    <footer class="app-footer">
+      <span class="footer-status" id="coiStatusPill" title="L'isolation Cross-Origin active SharedArrayBuffer, donc l'encodage FFmpeg multi-threads. Sans elle, l'encodage reste mono-thread.">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/>
+          <path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/>
+          <path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>
+        </svg>
+        <span id="coiStatusText">Vérification…</span>
+      </span>
+      <span class="footer-status is-ok" id="privacyPill" title="Aucun envoi réseau : tout le décodage, le rendu et l'encodage tournent sur votre appareil.">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+        <span>Traitement 100 % local</span>
+      </span>
+    </footer>
+  </div>
+
+  <!-- Backdrop for Mobile Drawers -->
+  <div class="mobile-sheet-backdrop" id="mobileSheetBackdrop"></div>
+
+  <!-- Mobile Bottom Navigation Dock -->
+  <nav class="mobile-nav-dock" id="mobileNavDock" aria-label="Navigation mobile">
+    <button type="button" class="btn-dock-tab" data-tab="watermark" id="dockBtnWatermark">
+      <div class="dock-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </div>
+      <span>Filigrane</span>
+    </button>
+    <button type="button" class="btn-dock-tab" data-tab="format" id="dockBtnFormat">
+      <div class="dock-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </div>
+      <span>Format</span>
+    </button>
+    <button type="button" class="btn-dock-tab btn-dock-export" data-tab="export" id="dockBtnExport">
+      <div class="dock-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <span>Exporter</span>
+    </button>
+  </nav>
+
+  <!-- Burger Slide-over Drawer & Backdrop -->
+  <div class="burger-backdrop" id="burgerBackdrop" aria-hidden="true"></div>
+  <aside class="burger-drawer" id="burgerDrawer" aria-label="Menu FiLiGRA">
+    <div class="drawer-top-bar">
+      <div class="drawer-brand-group">
+        <img src="filigra_logo.png" alt="FiLiGRA" class="drawer-logo-img">
+      </div>
+      <button type="button" class="btn-drawer-close" id="btnCloseBurger" aria-label="Fermer le menu">✕</button>
+    </div>
+
+    <div class="drawer-scroll-body">
+      <section class="drawer-panel-section" aria-label="Aide">
+        <div class="help-install-block" id="helpInstallBlock">
+          <h3 class="help-menu-title">Installer l’app</h3>
+          <p class="help-install-desc">Ajoutez FiLiGRA à l’écran d’accueil — sans App Store ni Play Store.</p>
+          <button type="button" class="btn-install-pwa" id="btnInstallPwa">
+            Installer FiLiGRA
+          </button>
+          <div class="help-install-ios" id="helpInstallIos" hidden>
+            <ol>
+              <li>Appuyez sur <strong>Partager</strong> dans Safari</li>
+              <li>Choisissez <strong>Sur l’écran d’accueil</strong></li>
+              <li>Validez <strong>Ajouter</strong></li>
+            </ol>
+          </div>
+          <p class="help-install-fallback" id="helpInstallFallback" hidden>
+            Si le bouton ne lance rien : menu du navigateur → <strong>Installer l’application</strong> (Chrome / Edge).
+          </p>
+          <p class="help-install-done" id="helpInstallDone" hidden>FiLiGRA est déjà ouverte en mode application.</p>
+        </div>
+
+        <h3 class="help-menu-title">Aide</h3>
+
+        <div class="drawer-steps-list">
+          <div class="drawer-step">
+            <span class="step-badge">1</span>
+            <div class="step-text">
+              <strong>Importer une vidéo</strong>
+              <p>Glissez-déposez un MP4, MOV ou WebM, ou utilisez Parcourir.</p>
+            </div>
+          </div>
+          <div class="drawer-step">
+            <span class="step-badge">2</span>
+            <div class="step-text">
+              <strong>Placer le filigrane</strong>
+              <p>Sur mobile, ouvrez Filigrane dans le dock. Déplacez et redimensionnez au doigt sur l’aperçu.</p>
+            </div>
+          </div>
+          <div class="drawer-step">
+            <span class="step-badge">3</span>
+            <div class="step-text">
+              <strong>Guides UI</strong>
+              <p>Activez TikTok, Shorts, Reels ou X pour éviter les boutons natifs, puis Zone sûre si besoin.</p>
+            </div>
+          </div>
+          <div class="drawer-step">
+            <span class="step-badge">4</span>
+            <div class="step-text">
+              <strong>Format & export</strong>
+              <p>Choisissez le ratio social, puis Exporter. Tout le rendu reste sur votre appareil.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="help-display-block">
+          <h4 class="help-subheading">Affichage</h4>
+          <label class="toggle-option-label" for="chkForceDesktop">
+            <input type="checkbox" id="chkForceDesktop" class="checkbox-custom">
+            <span class="checkbox-custom-ui"></span>
+            <span class="toggle-option-title">Forcer l’interface desktop</span>
+          </label>
+          <p class="help-display-desc">
+            Affiche la disposition complète en 1280 px de large, même sur téléphone. Rechargement nécessaire.
+          </p>
+        </div>
+
+        <div class="help-about-block">
+          <h4 class="help-subheading">À propos</h4>
+          <ul class="help-about-list">
+            <li><span>Application</span><strong>FiLiGRA</strong></li>
+            <li><span>Moteur</span><strong>FFmpeg.wasm 0.12</strong></li>
+            <li><span>Confidentialité</span><strong>Zéro serveur</strong></li>
+            <li><span>Auteur</span><strong><a href="https://instagram.com/t12lve" target="_blank" rel="noopener noreferrer">@t12lve</a></strong></li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <!-- Toast Notification -->
+  <div class="toast-notice" id="toastNotice" role="alert" aria-live="polite">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <span id="toastMessage">Notification</span>
+  </div>
+
+  <!-- Burger menu — wired inline so it works even if app.js / CDN hang -->
+  <script>
+    window.filigraToggleBurger = function (force) {
+      var drawer = document.getElementById("burgerDrawer");
+      var backdrop = document.getElementById("burgerBackdrop");
+      var btn = document.getElementById("btnBurgerMenu");
+      if (!drawer || !backdrop) return false;
+      var open = typeof force === "boolean" ? force : !drawer.classList.contains("open");
+      drawer.classList.toggle("open", open);
+      backdrop.classList.toggle("open", open);
+      document.body.classList.toggle("burger-open", open);
+      // Hard reset — no transform games
+      drawer.style.transform = "none";
+      drawer.style.display = open ? "flex" : "none";
+      backdrop.setAttribute("aria-hidden", open ? "false" : "true");
+      if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) {
+        var sheets = document.querySelectorAll(".mobile-sheet-open");
+        for (var i = 0; i < sheets.length; i++) sheets[i].classList.remove("mobile-sheet-open");
+        var sheetBd = document.getElementById("mobileSheetBackdrop");
+        if (sheetBd) sheetBd.classList.remove("active");
+        var docks = document.querySelectorAll(".btn-dock-tab.active");
+        for (var j = 0; j < docks.length; j++) docks[j].classList.remove("active");
+      }
+      return open;
+    };
+    document.addEventListener("DOMContentLoaded", function () {
+      var btn = document.getElementById("btnBurgerMenu");
+      var closeBtn = document.getElementById("btnCloseBurger");
+      var backdrop = document.getElementById("burgerBackdrop");
+      if (btn) {
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.filigraToggleBurger();
+        });
+      }
+      if (closeBtn) {
+        closeBtn.addEventListener("click", function () {
+          window.filigraToggleBurger(false);
+        });
+      }
+      if (backdrop) {
+        backdrop.addEventListener("click", function () {
+          window.filigraToggleBurger(false);
+        });
+      }
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") window.filigraToggleBurger(false);
+      });
+    });
+  </script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

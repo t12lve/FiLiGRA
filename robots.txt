@@ -1,0 +1,6 @@
+# robots.txt pour FiLiGRA Studio
+User-agent: *
+Allow: /
+
+# Sitemap Google
+Sitemap: https://t12lve.github.io/FiLiGRA/sitemap.xml
