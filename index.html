@@ -76,12 +76,14 @@
 
   <!-- PWA Manifest & Icons -->
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-  <link rel="icon" type="image/svg+xml" href="icon.svg">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="200x200" href="ico.png">
+  <link rel="shortcut icon" type="image/png" href="ico.png">
+  <link rel="apple-touch-icon" href="ico.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
 
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=1.1.0">
+  <link rel="stylesheet" href="style.css?v=1.1.1">
 
   <!-- FFmpeg.wasm & Util CDN Imports -->
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
@@ -126,6 +128,7 @@
           </div>
           <div class="video-meta-tags" id="videoMetaChips" style="display: none;">
             <span class="meta-chip" id="chipResolution">--x--</span>
+            <span class="meta-chip" id="chipFps">-- fps</span>
             <span class="meta-chip" id="chipDuration">--:--</span>
             <span class="meta-chip" id="chipSize">-- Mo</span>
           </div>
@@ -751,7 +754,7 @@
 
     <footer class="drawer-version-footer" aria-label="Version">
       <span class="drawer-version-name">FiLiGRA</span>
-      <span class="drawer-version-num" data-filigra-version>v1.1.0</span>
+      <span class="drawer-version-num" data-filigra-version>v1.1.1</span>
     </footer>
   </aside>
 
@@ -813,6 +816,6 @@
       });
     });
   </script>
-  <script type="module" src="app.js?v=1.1.0"></script>
+  <script type="module" src="app.js?v=1.1.1"></script>
 </body>
 </html>

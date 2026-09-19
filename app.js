@@ -59,10 +59,12 @@ const state = {
     height: 0,
     duration: 0,
     sizeBytes: 0,
+    fps: 30,
     aspectRatio: "16:9",
     aspectRatioVal: 16 / 9,
   },
   isPlaying: false,
+  wakeLock: null,
 
   // Watermark
   watermarkFile: null,
@@ -162,6 +164,7 @@ const els = {
   btnChangeVideo: document.getElementById("btnChangeVideo"),
   videoMetaChips: document.getElementById("videoMetaChips"),
   chipResolution: document.getElementById("chipResolution"),
+  chipFps: document.getElementById("chipFps"),
   chipDuration: document.getElementById("chipDuration"),
   chipSize: document.getElementById("chipSize"),
 
@@ -256,6 +259,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initPwaInstall();
   initDisplayPreference();
   initDefaultWatermarkFallback();
+  initWakeLock();
   updatePredictiveWeight();
 
   ensureFFmpegDependencies()
@@ -267,6 +271,159 @@ window.addEventListener("DOMContentLoaded", () => {
       appendLog("[Système] FFmpeg non disponible pour le moment.");
     });
 });
+
+/** Keep the screen on in browser + installed PWA (Wake Lock API). */
+function initWakeLock() {
+  if (!("wakeLock" in navigator)) {
+    appendLog("[Wake Lock] Non supporté sur ce navigateur.");
+    return;
+  }
+
+  const acquire = async () => {
+    if (document.visibilityState !== "visible") return;
+    try {
+      if (state.wakeLock) {
+        try {
+          await state.wakeLock.release();
+        } catch (_) {}
+        state.wakeLock = null;
+      }
+      state.wakeLock = await navigator.wakeLock.request("screen");
+      state.wakeLock.addEventListener("release", () => {
+        state.wakeLock = null;
+      });
+      appendLog("[Wake Lock] Écran maintenu allumé.");
+    } catch (err) {
+      console.warn("[FiLiGRA] Wake Lock:", err);
+    }
+  };
+
+  acquire();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") acquire();
+  });
+  window.addEventListener("focus", acquire);
+}
+
+/** Snap measured fps to common broadcast / phone rates. */
+function normalizeFps(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 30;
+  const candidates = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 120];
+  let best = 30;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = Math.abs(c - n);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  // Prefer integer labels when close (29.97→30 display still stores 30 if closer... keep 29.97 if within 0.2)
+  if (bestDist > 3) return Math.round(n * 1000) / 1000;
+  return best;
+}
+
+function formatFpsLabel(fps) {
+  if (!fps) return "30";
+  if (Math.abs(fps - 23.976) < 0.02) return "23.976";
+  if (Math.abs(fps - 29.97) < 0.02) return "29.97";
+  if (Math.abs(fps - 59.94) < 0.02) return "59.94";
+  if (Number.isInteger(fps)) return String(fps);
+  return String(Math.round(fps * 100) / 100);
+}
+
+function updateFpsChip() {
+  if (!els.chipFps) return;
+  const label = formatFpsLabel(state.videoMeta.fps);
+  els.chipFps.innerHTML = `<strong>${label} fps</strong>`;
+}
+
+/**
+ * Estimate fps via requestVideoFrameCallback while the clip plays briefly.
+ * Falls back to 30 if the API is missing.
+ */
+function detectFpsFromElement(video) {
+  return new Promise((resolve) => {
+    const fallback = () => resolve(30);
+    if (!video || typeof video.requestVideoFrameCallback !== "function") {
+      fallback();
+      return;
+    }
+
+    let frames = 0;
+    let startMedia = null;
+    let done = false;
+    const finish = (fps) => {
+      if (done) return;
+      done = true;
+      try {
+        video.pause();
+      } catch (_) {}
+      resolve(normalizeFps(fps));
+    };
+
+    const timeout = setTimeout(() => finish(frames > 1 && startMedia != null ? frames / Math.max(0.05, (video.currentTime || 0) - startMedia) : 30), 1600);
+
+    const onFrame = (_now, meta) => {
+      if (done) return;
+      if (startMedia == null) startMedia = meta.mediaTime;
+      frames++;
+      const elapsed = meta.mediaTime - startMedia;
+      if (elapsed >= 0.45 && frames >= 8) {
+        clearTimeout(timeout);
+        finish(frames / Math.max(0.05, elapsed));
+        return;
+      }
+      video.requestVideoFrameCallback(onFrame);
+    };
+
+    video.requestVideoFrameCallback(onFrame);
+    const playP = video.play();
+    if (playP && typeof playP.catch === "function") {
+      playP.catch(() => {
+        clearTimeout(timeout);
+        fallback();
+      });
+    }
+  });
+}
+
+/** Parse fps from FFmpeg -i probe logs (most reliable). */
+function parseFpsFromFfmpegLog(text) {
+  if (!text) return null;
+  // Prefer explicit "XX fps" on a Video stream line
+  const videoLine = text.match(/Video:[\s\S]{0,180}?(\d+(?:\.\d+)?)\s*fps/i);
+  if (videoLine) return normalizeFps(parseFloat(videoLine[1]));
+  const fps = text.match(/(\d+(?:\.\d+)?)\s*fps/i);
+  if (fps) return normalizeFps(parseFloat(fps[1]));
+  const tbr = text.match(/(\d+(?:\.\d+)?)\s*tbr/i);
+  if (tbr) return normalizeFps(parseFloat(tbr[1]));
+  const rate = text.match(/(\d+)\/(\d+)/);
+  if (rate) {
+    const a = parseFloat(rate[1]);
+    const b = parseFloat(rate[2]);
+    if (b > 0) return normalizeFps(a / b);
+  }
+  return null;
+}
+
+async function probeSourceFpsWithFFmpeg(ffmpeg) {
+  let buf = "";
+  let collecting = true;
+  const onLog = ({ message }) => {
+    if (collecting) buf += `${message}\n`;
+  };
+  ffmpeg.on("log", onLog);
+  try {
+    // -i alone exits with error but prints stream info
+    await ffmpeg.exec(["-hide_banner", "-i", "input_source.mp4"]);
+  } catch (_) {
+    // expected: no output file
+  }
+  collecting = false;
+  return parseFpsFromFfmpegLog(buf);
+}
 
 function checkIsolationStatus() {
   const isIsolated = window.crossOriginIsolated === true;
@@ -797,6 +954,8 @@ async function handleVideoFile(file) {
     els.chipResolution.innerHTML = `<strong>${w}×${h}</strong> (${simplified})`;
     els.chipDuration.innerHTML = `<strong>${formatTime(dur)}</strong>`;
     els.chipSize.innerHTML = `<strong>${(file.size / (1024 * 1024)).toFixed(1)} Mo</strong>`;
+    state.videoMeta.fps = 30;
+    updateFpsChip();
     if (els.videoMetaChips) els.videoMetaChips.style.display = "flex";
 
     // Setup Scrubber Range
@@ -812,11 +971,32 @@ async function handleVideoFile(file) {
     if (els.overlayToolbar) els.overlayToolbar.style.display = "flex";
     els.btnExportVideo.disabled = false;
 
-    // Seek to first frame and render
-    els.sourceVideo.currentTime = 0.01;
-    els.sourceVideo.onseeked = () => {
-      renderCanvas();
+    const seekPreview = () => {
+      try {
+        els.sourceVideo.pause();
+      } catch (_) {}
+      state.isPlaying = false;
+      if (els.iconPlay) els.iconPlay.style.display = "block";
+      if (els.iconPause) els.iconPause.style.display = "none";
+      els.sourceVideo.currentTime = 0.01;
+      els.sourceVideo.onseeked = () => {
+        renderCanvas();
+      };
     };
+
+    // Detect source fps (rVFC) — refined again at export via FFmpeg probe
+    detectFpsFromElement(els.sourceVideo)
+      .then((fps) => {
+        if (!state.videoFile) return;
+        state.videoMeta.fps = fps;
+        updateFpsChip();
+        appendLog(`[Vidéo] Cadence source détectée : ${formatFpsLabel(fps)} fps`);
+        updatePredictiveWeight();
+        seekPreview();
+      })
+      .catch(() => {
+        seekPreview();
+      });
 
     // Recalibrate watermark scale if auto-adaptive sizing applies
     if (state.watermarkLoaded) {
@@ -1164,42 +1344,51 @@ function getWatermarkExportSize(outW, outH) {
   return { x, y, w, h };
 }
 
+/** Desktop (souris) vs mobile/tactile — pas basé sur la largeur fenêtre seule. */
+function isTouchUi(pointerType) {
+  if (pointerType === "touch") return true;
+  if (typeof window.matchMedia !== "function") return false;
+  if (window.matchMedia("(pointer: coarse)").matches) return true;
+  if (window.matchMedia("(hover: none)").matches) return true;
+  return false;
+}
+
 /** Half-size of the visible handle square, in canvas pixels. */
-function getHandleVisualHalf() {
-  const hitR = getHandleHitRadius();
-  return Math.max(18, hitR * 0.62);
+function getHandleVisualHalf(pointerType) {
+  const touch = isTouchUi(pointerType);
+  const hitR = getHandleHitRadius(pointerType);
+  // Desktop : compact. Tactile : plus large mais plafonné pour ne pas manger le cadre.
+  let half = Math.max(touch ? 12 : 7, hitR * (touch ? 0.48 : 0.32));
+  const canvas = els.previewCanvas;
+  const minDim = Math.min(canvas.width, canvas.height);
+  const maxHalf = minDim * (touch ? 0.048 : 0.022);
+  return Math.min(half, Math.max(touch ? 12 : 7, maxHalf));
 }
 
 /**
- * Screen-space target for touch: ≥44–56 CSS px (Apple HIG / Material).
- * Uses the larger of width/height canvas scales so portrait video stays accurate.
+ * Hit target in canvas pixels.
+ * Desktop ~24–28 CSS px ; tactile ~52–56 CSS px (HIG / Material).
  */
 function getHandleHitRadius(pointerType) {
   const canvas = els.previewCanvas;
   const rect = canvas.getBoundingClientRect();
-  const coarse =
-    (typeof window.matchMedia === "function" &&
-      window.matchMedia("(pointer: coarse)").matches) ||
-    pointerType === "touch";
-  const mobileUi =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(max-width: 1080px)").matches;
-  const screenTarget = coarse || mobileUi ? 56 : 44;
+  const touch = isTouchUi(pointerType);
+  const screenTarget = touch ? 54 : 26;
   const scale = Math.max(
     canvas.width / Math.max(1, rect.width),
     canvas.height / Math.max(1, rect.height)
   );
-  return Math.max(coarse || mobileUi ? 32 : 26, screenTarget * scale);
+  return Math.max(touch ? 28 : 14, screenTarget * scale);
 }
 
 /**
  * Corner + mid-edge handles, inset toward the watermark so fingers
  * don't miss targets glued to the canvas / screen edge (PWA / mobile).
  */
-function getResizeHandles(bounds) {
+function getResizeHandles(bounds, pointerType) {
   const inset = Math.min(
-    getHandleVisualHalf(),
-    Math.max(8, Math.min(bounds.w, bounds.h) * 0.22)
+    getHandleVisualHalf(pointerType),
+    Math.max(6, Math.min(bounds.w, bounds.h) * (isTouchUi(pointerType) ? 0.18 : 0.1))
   );
   const x0 = bounds.x + inset;
   const y0 = bounds.y + inset;
@@ -1223,7 +1412,7 @@ function hitTestResizeHandle(coords, bounds, pointerType) {
   const r = getHandleHitRadius(pointerType);
   let bestId = null;
   let bestDist = r;
-  for (const h of getResizeHandles(bounds)) {
+  for (const h of getResizeHandles(bounds, pointerType)) {
     const d = Math.hypot(coords.x - h.x, coords.y - h.y);
     if (d <= bestDist) {
       bestDist = d;
@@ -1530,30 +1719,43 @@ function setOverlayGuide(overlayKey) {
 
 function drawSelectionBox(bounds) {
   ctx.save();
+  const touch = isTouchUi();
   const isDanger = window._lastOverlayCollision === true;
   const accent = isDanger ? "#f43f5e" : "#00f5ff";
-  ctx.strokeStyle = isDanger ? "rgba(244, 63, 94, 0.95)" : "rgba(0, 245, 255, 0.85)";
-  ctx.lineWidth = Math.max(2, els.previewCanvas.width * 0.0025);
-  ctx.setLineDash([10, 7]);
+  // Tactile : traits / poignées plus transparents pour laisser voir la vidéo
+  const boxAlpha = touch ? 0.45 : 0.85;
+  const fillAlpha = touch ? 0.28 : 0.92;
+  const strokeAlpha = touch ? 0.42 : 0.95;
+  const dotAlpha = touch ? 0.55 : 1;
+
+  ctx.strokeStyle = isDanger
+    ? `rgba(244, 63, 94, ${boxAlpha})`
+    : `rgba(0, 245, 255, ${boxAlpha})`;
+  ctx.lineWidth = Math.max(1.5, els.previewCanvas.width * (touch ? 0.002 : 0.0025));
+  ctx.setLineDash(touch ? [8, 8] : [10, 7]);
   ctx.strokeRect(bounds.x, bounds.y, bounds.w, bounds.h);
   ctx.setLineDash([]);
 
-  // Grosses accroches (coins + milieux) — zone tactile ≥56 CSS px en mobile/PWA
   const half = getHandleVisualHalf();
   const handles = getResizeHandles(bounds);
+  const lineW = Math.max(touch ? 1.5 : 2, els.previewCanvas.width * 0.0018);
 
   handles.forEach((h) => {
-    ctx.fillStyle = "#050a14";
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = Math.max(2.5, els.previewCanvas.width * 0.002);
+    ctx.fillStyle = `rgba(5, 10, 20, ${fillAlpha})`;
+    ctx.strokeStyle = isDanger
+      ? `rgba(244, 63, 94, ${strokeAlpha})`
+      : `rgba(0, 245, 255, ${strokeAlpha})`;
+    ctx.lineWidth = lineW;
     ctx.beginPath();
     ctx.rect(h.x - half, h.y - half, half * 2, half * 2);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = accent;
+    ctx.fillStyle = isDanger
+      ? `rgba(244, 63, 94, ${dotAlpha})`
+      : `rgba(0, 245, 255, ${dotAlpha})`;
     ctx.beginPath();
-    ctx.arc(h.x, h.y, Math.max(3, half * 0.28), 0, Math.PI * 2);
+    ctx.arc(h.x, h.y, Math.max(2, half * (touch ? 0.22 : 0.3)), 0, Math.PI * 2);
     ctx.fill();
   });
 
@@ -2090,6 +2292,19 @@ async function startFFmpegExport() {
     const videoData = await fetchFileFn(state.videoFile);
     await ffmpeg.writeFile("input_source.mp4", videoData);
 
+    // Probe source fps (keeps 30→30, 60→60, etc.)
+    updateProgressUI(8, "Analyse de la cadence source...");
+    const probedFps = await probeSourceFpsWithFFmpeg(ffmpeg);
+    if (probedFps) {
+      state.videoMeta.fps = probedFps;
+      updateFpsChip();
+      appendLog(`[Pipeline] Cadence source (probe) : ${formatFpsLabel(probedFps)} fps`);
+    } else {
+      appendLog(
+        `[Pipeline] Cadence source (UI) : ${formatFpsLabel(state.videoMeta.fps || 30)} fps`
+      );
+    }
+
     // 2. Prepare watermark PNG (and optionally burn social UI overlays if explicitly requested)
     updateProgressUI(10, "Préparation du filigrane...");
     appendLog("[Pipeline] Génération du filigrane avec transparence alpha...");
@@ -2177,6 +2392,8 @@ async function startFFmpegExport() {
     appendLog(`[FFmpeg Filter] ${filterComplex}`);
 
     // 4. Construct FFmpeg command with WebKit/iOS Safari flags
+    const outFps = state.videoMeta.fps || 30;
+    const fpsArg = formatFpsLabel(outFps);
     const ffmpegArgs = [
       "-i", "input_source.mp4",
       "-i", "watermark.png",
@@ -2186,6 +2403,8 @@ async function startFFmpegExport() {
       "-c:v", "libx264",
       "-preset", "veryfast", // plus compact qu'ultrafast, encore OK en WASM
       "-crf", String(state.exportSettings.crf),
+      "-r", fpsArg, // conserver la cadence source (30 / 60 / …)
+      "-vsync", "cfr",
       "-pix_fmt", "yuv420p", // Guaranteed Safari iOS & Android compatibility
       "-movflags", "+faststart", // Quick playback
       "-c:a", "aac",
@@ -2194,7 +2413,7 @@ async function startFFmpegExport() {
     ];
 
     appendLog(`[FFmpeg Commande] ffmpeg ${ffmpegArgs.join(" ")}`);
-    updateProgressUI(20, "Encodage vidéo H.264 MP4 en cours...");
+    updateProgressUI(20, `Encodage H.264 @ ${fpsArg} fps...`);
 
     // 5. Execute Transcoding
     await ffmpeg.exec(ffmpegArgs);
