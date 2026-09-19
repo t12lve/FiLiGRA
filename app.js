@@ -71,23 +71,29 @@ const state = {
   watermarkState: {
     x: 0.78, // Normalized coordinate (0 to 1)
     y: 0.78,
-    scale: 0.18, // 18% of video width by default
+    scale: 0.18, // width as fraction of video width
+    scaleY: null, // height as fraction of video height; null = keep PNG aspect ratio
     opacity: 0.85,
     margin: 0.04, // 4% edge margin
     rotation: 0, // degrees
     anchor: "bottom-right",
+    stretchFullscreen: false,
   },
 
   // Canvas WYSIWYG Interaction
   drag: {
     active: false,
     mode: null, // 'move' | 'resize'
+    handle: null, // 'tl' | 'tr' | 'bl' | 'br'
+    freeStretch: false,
     pointerId: null,
     startX: 0,
     startY: 0,
     initialX: 0,
     initialY: 0,
     initialScale: 0.18,
+    initialScaleY: null,
+    initialBounds: null,
     offsetX: 0,
     offsetY: 0,
   },
@@ -168,6 +174,7 @@ const els = {
   autoScaleBadge: document.getElementById("autoScaleBadge"),
   anchorButtons: document.querySelectorAll(".btn-anchor"),
   btnSnapSafeZone: document.getElementById("btnSnapSafeZone"),
+  btnWmFullscreen: document.getElementById("btnWmFullscreen"),
   sliderScale: document.getElementById("sliderScale"),
   valScale: document.getElementById("valScale"),
   sliderOpacity: document.getElementById("sliderOpacity"),
@@ -388,6 +395,8 @@ function initEventListeners() {
   // Watermark Sliders
   els.sliderScale.addEventListener("input", (e) => {
     const val = parseInt(e.target.value, 10);
+    state.watermarkState.stretchFullscreen = false;
+    state.watermarkState.scaleY = null; // revenir au ratio PNG
     state.watermarkState.scale = val / 100;
     els.valScale.textContent = `${val}%`;
     state.watermarkState.anchor = "custom";
@@ -461,13 +470,21 @@ function initEventListeners() {
   if (els.btnSnapSafeZone) {
     els.btnSnapSafeZone.addEventListener("click", () => {
       // Positionne le watermark en haut à gauche (zone 100% dégagée de tous les boutons sociaux)
+      state.watermarkState.stretchFullscreen = false;
+      state.watermarkState.scaleY = null;
       state.watermarkState.x = 0.08;
       state.watermarkState.y = 0.14;
       state.watermarkState.anchor = "custom";
       updateAnchorButtonsUI();
       clampWatermarkPosition();
       renderCanvas();
-      showToast("🎯 Filigrane repositionné dans la zone 100% sûre !");
+      showToast("Filigrane repositionné dans la zone 100% sûre");
+    });
+  }
+
+  if (els.btnWmFullscreen) {
+    els.btnWmFullscreen.addEventListener("click", () => {
+      applyWatermarkFullscreen(true);
     });
   }
 
@@ -956,27 +973,74 @@ async function initDefaultWatermarkFallback() {
 }
 
 /**
- * Auto-Adaptive Sizing:
- * If PNG width is > 40% of video width or < 5%, auto-resize to optimal 18%.
+ * Auto sizing:
+ * - Same (or near) pixel size as the video → stretch fullscreen
+ * - Otherwise keep a readable default (~18% width) when the PNG is tiny/huge
  */
 function applyAdaptiveWatermarkScaling() {
   if (!state.watermarkLoaded || !state.watermarkImage) return;
 
-  const videoW = state.videoMeta.width || 1920;
-  const wmNaturalW = state.watermarkImage.naturalWidth;
-  const ratio = wmNaturalW / videoW;
+  const videoW = state.videoMeta.width || els.previewCanvas.width || 1920;
+  const videoH = state.videoMeta.height || els.previewCanvas.height || 1080;
+  const ww = state.watermarkImage.naturalWidth;
+  const wh = state.watermarkImage.naturalHeight;
 
-  if (ratio > 0.4 || ratio < 0.05) {
-    state.watermarkState.scale = 0.18; // 18% optimal default
-    els.sliderScale.value = 18;
-    els.valScale.textContent = "18%";
-    els.autoScaleBadge.classList.add("visible");
-    appendLog(`[Auto-Sizing] Ratio PNG/Vidéo détecté à ${(ratio * 100).toFixed(0)}%. Échelle recalibrée à 18%.`);
-  } else {
-    els.autoScaleBadge.classList.remove("visible");
+  if (isNearExactResolution(videoW, videoH, ww, wh)) {
+    applyWatermarkFullscreen(true);
+    if (els.autoScaleBadge) els.autoScaleBadge.classList.add("visible");
+    appendLog(
+      `[Auto-Sizing] PNG ${ww}×${wh} ≈ vidéo ${videoW}×${videoH} → plein écran étiré.`
+    );
+    return;
   }
 
-  applyAnchor(state.watermarkState.anchor);
+  const ratio = ww / videoW;
+  if (ratio > 0.4 || ratio < 0.05) {
+    state.watermarkState.stretchFullscreen = false;
+    state.watermarkState.scaleY = null;
+    state.watermarkState.scale = 0.18;
+    els.sliderScale.value = 18;
+    els.valScale.textContent = "18%";
+    if (els.autoScaleBadge) els.autoScaleBadge.classList.add("visible");
+    appendLog(
+      `[Auto-Sizing] Ratio PNG/Vidéo ${(ratio * 100).toFixed(0)}%. Échelle à 18%.`
+    );
+  } else {
+    if (els.autoScaleBadge) els.autoScaleBadge.classList.remove("visible");
+  }
+
+  applyAnchor(state.watermarkState.anchor || "bottom-right");
+}
+
+function isNearExactResolution(vw, vh, ww, wh) {
+  return Math.abs(vw - ww) <= 4 && Math.abs(vh - wh) <= 4;
+}
+
+/** Stretch watermark to the full video frame (may distort aspect ratio). */
+function applyWatermarkFullscreen(announce = false) {
+  if (!state.watermarkLoaded || !state.watermarkImage) {
+    showToast("Importez d’abord un filigrane PNG.");
+    return;
+  }
+  state.watermarkState.stretchFullscreen = true;
+  state.watermarkState.scale = 1;
+  state.watermarkState.scaleY = 1;
+  state.watermarkState.x = 0;
+  state.watermarkState.y = 0;
+  state.watermarkState.rotation = 0;
+  state.watermarkState.anchor = "custom";
+  els.sliderScale.value = 100;
+  els.valScale.textContent = "100%";
+  if (els.sliderRotation) {
+    els.sliderRotation.value = 0;
+    els.valRotation.textContent = "0°";
+  }
+  updateAnchorButtonsUI();
+  renderCanvas();
+  if (announce) {
+    showToast("Filigrane étiré en plein écran");
+    appendLog("[Filigrane] Mode plein écran (étirement activé).");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -984,18 +1048,22 @@ function applyAdaptiveWatermarkScaling() {
 // ---------------------------------------------------------------------------
 function applyAnchor(anchorName) {
   if (!state.watermarkLoaded || !state.watermarkImage) return;
+  if (state.watermarkState.stretchFullscreen) {
+    state.watermarkState.stretchFullscreen = false;
+    state.watermarkState.scaleY = null;
+    if (state.watermarkState.scale >= 0.99) {
+      state.watermarkState.scale = 0.18;
+      els.sliderScale.value = 18;
+      els.valScale.textContent = "18%";
+    }
+  }
 
   const canvasW = els.previewCanvas.width;
   const canvasH = els.previewCanvas.height;
-  const scale = state.watermarkState.scale;
   const margin = state.watermarkState.margin;
-
-  const wmAspect = state.watermarkImage.naturalWidth / state.watermarkImage.naturalHeight;
-  const wmCanvasW = canvasW * scale;
-  const wmCanvasH = wmCanvasW / wmAspect;
-
-  const normW = scale;
-  const normH = wmCanvasH / canvasH;
+  const bounds = getWatermarkCanvasBounds();
+  const normW = bounds.w / canvasW;
+  const normH = bounds.h / canvasH;
 
   switch (anchorName) {
     case "top-left":
@@ -1040,14 +1108,146 @@ function updateAnchorButtonsUI() {
 
 function clampWatermarkPosition() {
   if (!state.watermarkLoaded || !state.watermarkImage) return;
+  if (state.watermarkState.stretchFullscreen) {
+    state.watermarkState.x = 0;
+    state.watermarkState.y = 0;
+    return;
+  }
   const canvasW = els.previewCanvas.width;
   const canvasH = els.previewCanvas.height;
-  const wmAspect = state.watermarkImage.naturalWidth / state.watermarkImage.naturalHeight;
-  const normW = state.watermarkState.scale;
-  const normH = (canvasW * normW) / wmAspect / canvasH;
+  const bounds = getWatermarkCanvasBounds();
+  const normW = bounds.w / canvasW;
+  const normH = bounds.h / canvasH;
 
   state.watermarkState.x = Math.max(0, Math.min(1 - normW, state.watermarkState.x));
   state.watermarkState.y = Math.max(0, Math.min(1 - normH, state.watermarkState.y));
+}
+
+function getWatermarkCanvasBounds() {
+  if (!state.watermarkLoaded || !state.watermarkImage) return null;
+  const canvasW = els.previewCanvas.width;
+  const canvasH = els.previewCanvas.height;
+
+  if (state.watermarkState.stretchFullscreen) {
+    return { x: 0, y: 0, w: canvasW, h: canvasH, right: canvasW, bottom: canvasH };
+  }
+
+  const wmAspect =
+    state.watermarkImage.naturalWidth / Math.max(1, state.watermarkImage.naturalHeight);
+  const w = canvasW * state.watermarkState.scale;
+  const h =
+    state.watermarkState.scaleY != null
+      ? canvasH * state.watermarkState.scaleY
+      : w / wmAspect;
+  const x = canvasW * state.watermarkState.x;
+  const y = canvasH * state.watermarkState.y;
+
+  return { x, y, w, h, right: x + w, bottom: y + h };
+}
+
+function getWatermarkExportSize(outW, outH) {
+  if (state.watermarkState.stretchFullscreen) {
+    return { x: 0, y: 0, w: outW, h: outH };
+  }
+  const w = Math.max(16, Math.round(outW * state.watermarkState.scale));
+  let h;
+  if (state.watermarkState.scaleY != null) {
+    h = Math.max(16, Math.round(outH * state.watermarkState.scaleY));
+  } else {
+    const aspect =
+      (state.watermarkImage.naturalHeight || 1) /
+      Math.max(1, state.watermarkImage.naturalWidth || 1);
+    h = Math.max(16, Math.round(w * aspect));
+  }
+  const x = Math.round(outW * state.watermarkState.x);
+  const y = Math.round(outH * state.watermarkState.y);
+  return { x, y, w, h };
+}
+
+/** Half-size of the visible handle square, in canvas pixels. */
+function getHandleVisualHalf() {
+  const hitR = getHandleHitRadius();
+  return Math.max(18, hitR * 0.62);
+}
+
+/**
+ * Screen-space target for touch: ≥44–56 CSS px (Apple HIG / Material).
+ * Uses the larger of width/height canvas scales so portrait video stays accurate.
+ */
+function getHandleHitRadius(pointerType) {
+  const canvas = els.previewCanvas;
+  const rect = canvas.getBoundingClientRect();
+  const coarse =
+    (typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches) ||
+    pointerType === "touch";
+  const mobileUi =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 1080px)").matches;
+  const screenTarget = coarse || mobileUi ? 56 : 44;
+  const scale = Math.max(
+    canvas.width / Math.max(1, rect.width),
+    canvas.height / Math.max(1, rect.height)
+  );
+  return Math.max(coarse || mobileUi ? 32 : 26, screenTarget * scale);
+}
+
+/**
+ * Corner + mid-edge handles, inset toward the watermark so fingers
+ * don't miss targets glued to the canvas / screen edge (PWA / mobile).
+ */
+function getResizeHandles(bounds) {
+  const inset = Math.min(
+    getHandleVisualHalf(),
+    Math.max(8, Math.min(bounds.w, bounds.h) * 0.22)
+  );
+  const x0 = bounds.x + inset;
+  const y0 = bounds.y + inset;
+  const x1 = bounds.right - inset;
+  const y1 = bounds.bottom - inset;
+  const cx = (bounds.x + bounds.right) / 2;
+  const cy = (bounds.y + bounds.bottom) / 2;
+  return [
+    { id: "tl", x: x0, y: y0 },
+    { id: "t", x: cx, y: y0 },
+    { id: "tr", x: x1, y: y0 },
+    { id: "l", x: x0, y: cy },
+    { id: "r", x: x1, y: cy },
+    { id: "bl", x: x0, y: y1 },
+    { id: "b", x: cx, y: y1 },
+    { id: "br", x: x1, y: y1 },
+  ];
+}
+
+function hitTestResizeHandle(coords, bounds, pointerType) {
+  const r = getHandleHitRadius(pointerType);
+  let bestId = null;
+  let bestDist = r;
+  for (const h of getResizeHandles(bounds)) {
+    const d = Math.hypot(coords.x - h.x, coords.y - h.y);
+    if (d <= bestDist) {
+      bestDist = d;
+      bestId = h.id;
+    }
+  }
+  return bestId;
+}
+
+function handleMovesEdges(handle) {
+  return {
+    left: handle === "tl" || handle === "bl" || handle === "l",
+    right: handle === "tr" || handle === "br" || handle === "r",
+    top: handle === "tl" || handle === "tr" || handle === "t",
+    bottom: handle === "bl" || handle === "br" || handle === "b",
+  };
+}
+
+function cursorForHandle(handleId) {
+  if (!handleId) return "crosshair";
+  if (handleId === "t" || handleId === "b") return "ns-resize";
+  if (handleId === "l" || handleId === "r") return "ew-resize";
+  if (handleId === "tl" || handleId === "br") return "nwse-resize";
+  return "nesw-resize";
 }
 
 // ---------------------------------------------------------------------------
@@ -1056,10 +1256,12 @@ function clampWatermarkPosition() {
 function initCanvasPointerEvents() {
   const canvas = els.previewCanvas;
 
-  canvas.addEventListener("pointerdown", onCanvasPointerDown);
-  canvas.addEventListener("pointermove", onCanvasPointerMove);
+  // passive:false so preventDefault blocks scroll/zoom while dragging on iOS PWA
+  canvas.addEventListener("pointerdown", onCanvasPointerDown, { passive: false });
+  canvas.addEventListener("pointermove", onCanvasPointerMove, { passive: false });
   canvas.addEventListener("pointerup", onCanvasPointerUp);
   canvas.addEventListener("pointercancel", onCanvasPointerUp);
+  canvas.addEventListener("lostpointercapture", onCanvasPointerUp);
 }
 
 function getCanvasPointerCoords(e) {
@@ -1073,55 +1275,50 @@ function getCanvasPointerCoords(e) {
   };
 }
 
-function getWatermarkCanvasBounds() {
-  if (!state.watermarkLoaded || !state.watermarkImage) return null;
-  const canvasW = els.previewCanvas.width;
-  const canvasH = els.previewCanvas.height;
-  const wmAspect = state.watermarkImage.naturalWidth / state.watermarkImage.naturalHeight;
-  const w = canvasW * state.watermarkState.scale;
-  const h = w / wmAspect;
-  const x = canvasW * state.watermarkState.x;
-  const y = canvasH * state.watermarkState.y;
-
-  return { x, y, w, h, right: x + w, bottom: y + h };
-}
-
 function onCanvasPointerDown(e) {
   if (!state.watermarkLoaded) return;
   const coords = getCanvasPointerCoords(e);
   const bounds = getWatermarkCanvasBounds();
   if (!bounds) return;
 
-  // Handle radius in canvas coordinates
-  const handleRadius = Math.max(24, bounds.w * 0.1);
-  const distToResizeHandle = Math.hypot(coords.x - bounds.right, coords.y - bounds.bottom);
+  const handleId = hitTestResizeHandle(coords, bounds, e.pointerType);
 
-  if (distToResizeHandle <= handleRadius) {
-    // Resize mode
+  if (handleId) {
     state.drag.active = true;
     state.drag.mode = "resize";
+    state.drag.handle = handleId;
     state.drag.pointerId = e.pointerId;
     state.drag.startX = coords.x;
     state.drag.startY = coords.y;
     state.drag.initialScale = state.watermarkState.scale;
+    state.drag.initialScaleY =
+      state.watermarkState.scaleY != null
+        ? state.watermarkState.scaleY
+        : bounds.h / els.previewCanvas.height;
+    state.drag.initialBounds = { ...bounds };
+    state.drag.freeStretch =
+      state.watermarkState.stretchFullscreen || state.watermarkState.scaleY != null;
     els.previewCanvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
   } else if (
     coords.x >= bounds.x &&
     coords.x <= bounds.right &&
     coords.y >= bounds.y &&
     coords.y <= bounds.bottom
   ) {
-    // Move mode
     state.drag.active = true;
     state.drag.mode = "move";
+    state.drag.handle = null;
     state.drag.pointerId = e.pointerId;
     state.drag.offsetX = coords.x - bounds.x;
     state.drag.offsetY = coords.y - bounds.y;
     els.previewCanvas.setPointerCapture(e.pointerId);
-  } else {
-    // Click outside moves watermark center directly to click point
-    state.watermarkState.x = coords.x / els.previewCanvas.width - bounds.w / els.previewCanvas.width / 2;
-    state.watermarkState.y = coords.y / els.previewCanvas.height - bounds.h / els.previewCanvas.height / 2;
+    e.preventDefault();
+  } else if (!state.watermarkState.stretchFullscreen) {
+    state.watermarkState.x =
+      coords.x / els.previewCanvas.width - bounds.w / els.previewCanvas.width / 2;
+    state.watermarkState.y =
+      coords.y / els.previewCanvas.height - bounds.h / els.previewCanvas.height / 2;
     state.watermarkState.anchor = "custom";
     updateAnchorButtonsUI();
     clampWatermarkPosition();
@@ -1130,12 +1327,36 @@ function onCanvasPointerDown(e) {
 }
 
 function onCanvasPointerMove(e) {
-  if (!state.drag.active) return;
+  if (!state.drag.active) {
+    const coords = getCanvasPointerCoords(e);
+    const bounds = getWatermarkCanvasBounds();
+    const handleId = bounds
+      ? hitTestResizeHandle(coords, bounds, e.pointerType)
+      : null;
+    if (handleId) {
+      els.previewCanvas.style.cursor = cursorForHandle(handleId);
+    } else if (
+      bounds &&
+      coords.x >= bounds.x &&
+      coords.x <= bounds.right &&
+      coords.y >= bounds.y &&
+      coords.y <= bounds.bottom
+    ) {
+      els.previewCanvas.style.cursor = "move";
+    } else {
+      els.previewCanvas.style.cursor = "crosshair";
+    }
+    return;
+  }
+  if (state.drag.pointerId != null && e.pointerId !== state.drag.pointerId) return;
+  e.preventDefault();
+
   const coords = getCanvasPointerCoords(e);
   const canvasW = els.previewCanvas.width;
   const canvasH = els.previewCanvas.height;
 
   if (state.drag.mode === "move") {
+    if (state.watermarkState.stretchFullscreen) return;
     const newCanvasX = coords.x - state.drag.offsetX;
     const newCanvasY = coords.y - state.drag.offsetY;
 
@@ -1146,27 +1367,77 @@ function onCanvasPointerMove(e) {
     clampWatermarkPosition();
     renderCanvas();
   } else if (state.drag.mode === "resize") {
-    const bounds = getWatermarkCanvasBounds();
-    const newWidth = Math.max(30, coords.x - bounds.x);
-    const newScale = Math.min(0.8, Math.max(0.05, newWidth / canvasW));
+    const ib = state.drag.initialBounds;
+    const handle = state.drag.handle || "br";
+    const edges = handleMovesEdges(handle);
+    let left = ib.x;
+    let top = ib.y;
+    let right = ib.right;
+    let bottom = ib.bottom;
 
-    state.watermarkState.scale = newScale;
-    els.sliderScale.value = Math.round(newScale * 100);
-    els.valScale.textContent = `${Math.round(newScale * 100)}%`;
-    clampWatermarkPosition();
+    if (edges.right) right = coords.x;
+    if (edges.left) left = coords.x;
+    if (edges.bottom) bottom = coords.y;
+    if (edges.top) top = coords.y;
+
+    let newW = Math.max(40, right - left);
+    let newH = Math.max(40, bottom - top);
+
+    // Touch / souris : étirement libre. Alt = garder le ratio PNG.
+    const free = !e.altKey;
+
+    if (!free) {
+      const aspect =
+        state.watermarkImage.naturalWidth /
+        Math.max(1, state.watermarkImage.naturalHeight);
+      newH = newW / aspect;
+      if (edges.top) top = bottom - newH;
+      if (edges.left) left = right - newW;
+    }
+
+    if (left < 0) {
+      newW += left;
+      left = 0;
+    }
+    if (top < 0) {
+      newH += top;
+      top = 0;
+    }
+    if (left + newW > canvasW) newW = canvasW - left;
+    if (top + newH > canvasH) newH = canvasH - top;
+    newW = Math.max(40, newW);
+    newH = Math.max(40, newH);
+
+    state.watermarkState.stretchFullscreen = false;
+    state.watermarkState.x = left / canvasW;
+    state.watermarkState.y = top / canvasH;
+    state.watermarkState.scale = Math.min(1, Math.max(0.05, newW / canvasW));
+    if (free) {
+      state.watermarkState.scaleY = Math.min(1, Math.max(0.05, newH / canvasH));
+    } else {
+      state.watermarkState.scaleY = null;
+    }
+    state.watermarkState.anchor = "custom";
+    els.sliderScale.value = Math.round(state.watermarkState.scale * 100);
+    els.valScale.textContent = `${Math.round(state.watermarkState.scale * 100)}%`;
+    updateAnchorButtonsUI();
     renderCanvas();
   }
 }
 
 function onCanvasPointerUp(e) {
-  if (state.drag.active) {
-    state.drag.active = false;
-    state.drag.mode = null;
-    try {
+  if (!state.drag.active) return;
+  if (state.drag.pointerId != null && e.pointerId !== state.drag.pointerId) return;
+  state.drag.active = false;
+  state.drag.mode = null;
+  state.drag.handle = null;
+  state.drag.pointerId = null;
+  try {
+    if (e && e.pointerId != null) {
       els.previewCanvas.releasePointerCapture(e.pointerId);
-    } catch (_) {}
-    renderCanvas();
-  }
+    }
+  } catch (_) {}
+  renderCanvas();
 }
 
 // ---------------------------------------------------------------------------
@@ -1260,40 +1531,31 @@ function setOverlayGuide(overlayKey) {
 function drawSelectionBox(bounds) {
   ctx.save();
   const isDanger = window._lastOverlayCollision === true;
+  const accent = isDanger ? "#f43f5e" : "#00f5ff";
   ctx.strokeStyle = isDanger ? "rgba(244, 63, 94, 0.95)" : "rgba(0, 245, 255, 0.85)";
-  ctx.lineWidth = Math.max(2, els.previewCanvas.width * 0.002);
-  ctx.setLineDash([8, 6]);
+  ctx.lineWidth = Math.max(2, els.previewCanvas.width * 0.0025);
+  ctx.setLineDash([10, 7]);
   ctx.strokeRect(bounds.x, bounds.y, bounds.w, bounds.h);
   ctx.setLineDash([]);
 
-  // Corner Dots
-  const dotR = Math.max(5, els.previewCanvas.width * 0.005);
-  const corners = [
-    { x: bounds.x, y: bounds.y },
-    { x: bounds.right, y: bounds.y },
-    { x: bounds.x, y: bounds.bottom },
-  ];
+  // Grosses accroches (coins + milieux) — zone tactile ≥56 CSS px en mobile/PWA
+  const half = getHandleVisualHalf();
+  const handles = getResizeHandles(bounds);
 
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = isDanger ? "#f43f5e" : "#00f5ff";
-  ctx.lineWidth = 2;
-
-  corners.forEach((pt) => {
+  handles.forEach((h) => {
+    ctx.fillStyle = "#050a14";
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = Math.max(2.5, els.previewCanvas.width * 0.002);
     ctx.beginPath();
-    ctx.arc(pt.x, pt.y, dotR, 0, Math.PI * 2);
+    ctx.rect(h.x - half, h.y - half, half * 2, half * 2);
     ctx.fill();
     ctx.stroke();
-  });
 
-  // Resize Corner Handle (Bottom-Right)
-  const resizeR = Math.max(9, els.previewCanvas.width * 0.008);
-  ctx.beginPath();
-  ctx.arc(bounds.right, bounds.bottom, resizeR, 0, Math.PI * 2);
-  ctx.fillStyle = isDanger ? "#f43f5e" : "#a855f7";
-  ctx.fill();
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 2.5;
-  ctx.stroke();
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, Math.max(3, half * 0.28), 0, Math.PI * 2);
+    ctx.fill();
+  });
 
   ctx.restore();
 }
@@ -1849,11 +2111,11 @@ async function startFFmpegExport() {
       // 2a. Dessiner le filigrane
       if (state.watermarkImage) {
         fCtx.save();
-        const wmTargetW = Math.max(16, Math.round(outW * state.watermarkState.scale));
-        const aspect = (state.watermarkImage.naturalHeight || 1) / (state.watermarkImage.naturalWidth || 1);
-        const wmTargetH = Math.round(wmTargetW * aspect);
-        const posX = Math.round(outW * state.watermarkState.x);
-        const posY = Math.round(outH * state.watermarkState.y);
+        const wmBounds = getWatermarkExportSize(outW, outH);
+        const wmTargetW = wmBounds.w;
+        const wmTargetH = wmBounds.h;
+        const posX = wmBounds.x;
+        const posY = wmBounds.y;
         fCtx.globalAlpha = state.watermarkState.opacity;
 
         const rot = state.watermarkState.rotation || 0;
@@ -1893,19 +2155,22 @@ async function startFFmpegExport() {
 
       // 3. Translate relative WYSIWYG coordinates into FFmpeg filter_complex
       updateProgressUI(15, "Construction des filtres vidéo...");
-      const wmTargetW = Math.max(16, Math.round(outW * state.watermarkState.scale));
-      const posX = Math.round(outW * state.watermarkState.x);
-      const posY = Math.round(outH * state.watermarkState.y);
+      const wmBounds = getWatermarkExportSize(outW, outH);
+      const wmTargetW = wmBounds.w;
+      const wmTargetH = wmBounds.h;
+      const posX = wmBounds.x;
+      const posY = wmBounds.y;
       const opacity = state.watermarkState.opacity.toFixed(2);
+      const stretchScale = `scale=${wmTargetW}:${wmTargetH}`;
 
       if (isDifferent) {
         if (fitMode === "crop") {
-          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH}[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},scale=${wmTargetW}:-1[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
+          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH}[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},${stretchScale}[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
         } else {
-          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=decrease,pad=${outW}:${outH}:(ow-iw)/2:(oh-ih)/2:black[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},scale=${wmTargetW}:-1[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
+          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=decrease,pad=${outW}:${outH}:(ow-iw)/2:(oh-ih)/2:black[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},${stretchScale}[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
         }
       } else {
-        filterComplex = `[0:v]null[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},scale=${wmTargetW}:-1[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
+        filterComplex = `[0:v]null[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},${stretchScale}[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
       }
     }
 
@@ -1919,7 +2184,7 @@ async function startFFmpegExport() {
       "-map", "[outv]",
       "-map", "0:a?", // Include audio if present, gracefully ignore if none
       "-c:v", "libx264",
-      "-preset", "ultrafast", // High performance for WASM
+      "-preset", "veryfast", // plus compact qu'ultrafast, encore OK en WASM
       "-crf", String(state.exportSettings.crf),
       "-pix_fmt", "yuv420p", // Guaranteed Safari iOS & Android compatibility
       "-movflags", "+faststart", // Quick playback

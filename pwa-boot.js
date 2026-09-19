@@ -1,8 +1,10 @@
 /**
- * FiLiGRA PWA boot — registers sw.js (COI headers + shell cache)
- * Adapted from coi-serviceworker client pattern.
+ * FiLiGRA PWA boot — COI + SW registration + hard refresh on new deploy
  */
 (() => {
+  const STORAGE_KEY = "filigra:deploy-version";
+  const RELOAD_FLAG = "filigra:hard-reload-for";
+
   const reloadedBySelf = window.sessionStorage.getItem("coiReloadedBySelf");
   window.sessionStorage.removeItem("coiReloadedBySelf");
   const coepDegrading = reloadedBySelf === "coepdegrade";
@@ -18,6 +20,72 @@
   };
 
   const n = navigator;
+
+  async function clearClientCaches() {
+    if (!("caches" in window)) return;
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  }
+
+  async function unregisterWorkers() {
+    if (!n.serviceWorker) return;
+    const regs = await n.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+  }
+
+  /** Fetch version.json (never from cache). On mismatch → wipe SW/caches + hard reload. */
+  async function hardRefreshIfNewDeploy() {
+    try {
+      const res = await fetch(`version.json?_=${Date.now()}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      const remote = String(data.version || "").trim();
+      if (!remote) return false;
+
+      const local = localStorage.getItem(STORAGE_KEY);
+      if (local === remote) return false;
+
+      localStorage.setItem(STORAGE_KEY, remote);
+      if (sessionStorage.getItem(RELOAD_FLAG) === remote) return false;
+      sessionStorage.setItem(RELOAD_FLAG, remote);
+
+      if (!coi.quiet) {
+        console.log("[FiLiGRA-PWA] Nouvelle version", remote, "— hard refresh.");
+      }
+
+      await clearClientCaches();
+      await unregisterWorkers();
+
+      const u = new URL(window.location.href);
+      u.searchParams.set("_v", remote);
+      window.location.replace(u.href);
+      return true;
+    } catch (_) {
+      // Offline / first paint — continue with cached shell
+      return false;
+    }
+  }
+
+  function paintVersionLabels() {
+    const v = window.FILIGRA_VERSION || localStorage.getItem(STORAGE_KEY) || "—";
+    const label = v.charAt(0) === "v" ? v : "v" + v;
+    document.querySelectorAll("[data-filigra-version]").forEach((el) => {
+      el.textContent = label;
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", paintVersionLabels);
+  } else {
+    paintVersionLabels();
+  }
+
+  // Kick off version check ASAP (before SW register when possible)
+  const refreshGate = hardRefreshIfNewDeploy();
+
   const controlling = n.serviceWorker && n.serviceWorker.controller;
 
   if (controlling && !window.crossOriginIsolated) {
@@ -45,40 +113,71 @@
     }
   }
 
-  if (window.crossOriginIsolated !== false || !coi.shouldRegister()) return;
+  refreshGate.then((didReload) => {
+    if (didReload) return;
+    bootServiceWorker();
+  });
 
-  if (!window.isSecureContext) {
-    if (!coi.quiet) {
-      console.log("[FiLiGRA-PWA] Secure context required for COI / PWA.");
-    }
-    return;
-  }
+  function bootServiceWorker() {
+    // Same gate as upstream COI boot: only register when not yet isolated
+    if (window.crossOriginIsolated !== false || !coi.shouldRegister()) return;
 
-  if (!n.serviceWorker) {
-    if (!coi.quiet) console.error("[FiLiGRA-PWA] Service Worker unsupported.");
-    return;
-  }
-
-  const scriptUrl = new URL("sw.js", window.location.href).href;
-
-  n.serviceWorker.register(scriptUrl).then(
-    (registration) => {
+    if (!window.isSecureContext) {
       if (!coi.quiet) {
-        console.log("[FiLiGRA-PWA] SW registered:", registration.scope);
+        console.log("[FiLiGRA-PWA] Secure context required for COI / PWA.");
       }
-      registration.addEventListener("updatefound", () => {
-        if (!coi.quiet) console.log("[FiLiGRA-PWA] SW updatefound — reload.");
-        window.sessionStorage.setItem("coiReloadedBySelf", "updatefound");
-        coi.doReload();
-      });
-      if (registration.active && !n.serviceWorker.controller) {
-        if (!coi.quiet) console.log("[FiLiGRA-PWA] Taking control — reload.");
-        window.sessionStorage.setItem("coiReloadedBySelf", "notcontrolling");
-        coi.doReload();
-      }
-    },
-    (err) => {
-      if (!coi.quiet) console.error("[FiLiGRA-PWA] SW registration failed:", err);
+      return;
     }
-  );
+
+    if (!n.serviceWorker) {
+      if (!coi.quiet) console.error("[FiLiGRA-PWA] Service Worker unsupported.");
+      return;
+    }
+
+    const ver = window.FILIGRA_VERSION || "dev";
+    const scriptUrl = new URL(`sw.js?v=${encodeURIComponent(ver)}`, window.location.href)
+      .href;
+
+    let refreshing = false;
+    n.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing) return;
+      refreshing = true;
+      if (!coi.quiet) console.log("[FiLiGRA-PWA] Nouveau SW actif — reload.");
+      window.sessionStorage.setItem("coiReloadedBySelf", "controllerchange");
+      coi.doReload();
+    });
+
+    n.serviceWorker.register(scriptUrl).then(
+      (registration) => {
+        if (!coi.quiet) {
+          console.log("[FiLiGRA-PWA] SW registered:", registration.scope);
+        }
+
+        registration.update().catch(() => {});
+
+        registration.addEventListener("updatefound", () => {
+          const installing = registration.installing;
+          if (!installing) return;
+          installing.addEventListener("statechange", () => {
+            if (
+              installing.state === "installed" &&
+              n.serviceWorker.controller
+            ) {
+              installing.postMessage({ type: "SKIP_WAITING" });
+              if (!coi.quiet) console.log("[FiLiGRA-PWA] SW update — skipWaiting.");
+            }
+          });
+        });
+
+        if (registration.active && !n.serviceWorker.controller) {
+          if (!coi.quiet) console.log("[FiLiGRA-PWA] Taking control — reload.");
+          window.sessionStorage.setItem("coiReloadedBySelf", "notcontrolling");
+          coi.doReload();
+        }
+      },
+      (err) => {
+        if (!coi.quiet) console.error("[FiLiGRA-PWA] SW registration failed:", err);
+      }
+    );
+  }
 })();

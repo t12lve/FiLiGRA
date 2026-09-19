@@ -1,13 +1,17 @@
 /**
  * FiLiGRA Service Worker — shell cache + Cross-Origin Isolation headers
+ * CACHE_NAME must change on every release (paired with version.js / version.json).
  */
-const CACHE_NAME = "filigra-shell-v4";
+const APP_VERSION = "1.1.0";
+const CACHE_NAME = `filigra-shell-v${APP_VERSION}`;
 const SHELL_ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
   "./pwa-boot.js",
+  "./version.js",
+  "./version.json",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
@@ -45,7 +49,9 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (ev) => {
   if (!ev.data) return;
-  if (ev.data.type === "deregister") {
+  if (ev.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  } else if (ev.data.type === "deregister") {
     self.registration.unregister().then(() => {
       return self.clients.matchAll();
     }).then((clients) => {
@@ -53,6 +59,8 @@ self.addEventListener("message", (ev) => {
     });
   } else if (ev.data.type === "coepCredentialless") {
     coepCredentialless = ev.data.value;
+  } else if (ev.data.type === "CLEAR_CACHES") {
+    caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))));
   }
 });
 
@@ -67,6 +75,10 @@ function withCoiHeaders(response) {
     newHeaders.set("Cross-Origin-Resource-Policy", "cross-origin");
   }
   newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
+  // Encourage browsers / CDNs not to keep stale HTML/JS after a deploy
+  if (response.url && /\.(html|js|css|json)(\?|$)/i.test(response.url)) {
+    newHeaders.set("Cache-Control", "no-cache, must-revalidate");
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -89,11 +101,14 @@ self.addEventListener("fetch", (event) => {
   const isSameOrigin = url.origin === self.location.origin;
   const isShellGet = r.method === "GET" && isSameOrigin;
 
+  // Always network-first for version.json (hard-refresh gate)
+  const isVersionProbe = url.pathname.endsWith("/version.json");
+
   event.respondWith(
-    fetch(request)
+    fetch(isVersionProbe ? new Request(request, { cache: "no-store" }) : request)
       .then((response) => {
         const stamped = withCoiHeaders(response.clone());
-        if (isShellGet && response.ok) {
+        if (isShellGet && response.ok && !isVersionProbe) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(r, copy)).catch(() => {});
         }

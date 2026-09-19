@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <!-- 1. Cross-Origin Isolation + PWA shell (registers sw.js) -->
+  <!-- 1. Version + Cross-Origin Isolation + PWA shell (registers sw.js) -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <script src="version.js"></script>
   <script>
     window.coi = {
       // Register our combined SW (COI headers + shell cache)
@@ -78,7 +81,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=1.1.0">
 
   <!-- FFmpeg.wasm & Util CDN Imports -->
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
@@ -314,6 +317,10 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
               <span>Éviter les boutons UI (Zone sûre)</span>
             </button>
+            <button type="button" class="btn-snap-safe btn-wm-fullscreen" id="btnWmFullscreen" title="Étirer le filigrane sur toute la vidéo (ignore le ratio)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+              <span>Plein écran (étirer)</span>
+            </button>
           </div>
 
           <!-- Sliders Stack -->
@@ -324,7 +331,7 @@
                 <span>Échelle relative</span>
                 <span class="slider-value" id="valScale">18%</span>
               </div>
-              <input type="range" id="sliderScale" min="5" max="80" step="1" value="18" aria-label="Échelle du watermark en pourcentage de la largeur vidéo">
+              <input type="range" id="sliderScale" min="5" max="100" step="1" value="18" aria-label="Échelle du watermark en pourcentage de la largeur vidéo">
             </div>
 
             <!-- Opacity Slider -->
@@ -741,6 +748,11 @@
         </div>
       </section>
     </div>
+
+    <footer class="drawer-version-footer" aria-label="Version">
+      <span class="drawer-version-name">FiLiGRA</span>
+      <span class="drawer-version-num" data-filigra-version>v1.1.0</span>
+    </footer>
   </aside>
 
   <!-- Toast Notification -->
@@ -801,6 +813,6 @@
       });
     });
   </script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=1.1.0"></script>
 </body>
 </html>
