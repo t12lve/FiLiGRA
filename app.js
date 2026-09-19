@@ -1218,8 +1218,8 @@ function applyWatermarkFullscreen(announce = false) {
   updateAnchorButtonsUI();
   renderCanvas();
   if (announce) {
-    showToast("Filigrane étiré en plein écran");
-    appendLog("[Filigrane] Mode plein écran (étirement activé).");
+    showToast("Plein écran — déplacez / pivotez pour dépasser le cadre");
+    appendLog("[Filigrane] Plein écran : débordement et rotation autorisés.");
   }
 }
 
@@ -1286,31 +1286,36 @@ function updateAnchorButtonsUI() {
   });
 }
 
+/**
+ * Soft clamp: the watermark may overflow the frame (shift / rotate a
+ * full-bleed PNG). Keep a small overlap so it stays grabbable.
+ */
 function clampWatermarkPosition() {
   if (!state.watermarkLoaded || !state.watermarkImage) return;
-  if (state.watermarkState.stretchFullscreen) {
-    state.watermarkState.x = 0;
-    state.watermarkState.y = 0;
-    return;
-  }
   const canvasW = els.previewCanvas.width;
   const canvasH = els.previewCanvas.height;
-  const bounds = getWatermarkCanvasBounds();
-  const normW = bounds.w / canvasW;
-  const normH = bounds.h / canvasH;
+  if (!canvasW || !canvasH) return;
 
-  state.watermarkState.x = Math.max(0, Math.min(1 - normW, state.watermarkState.x));
-  state.watermarkState.y = Math.max(0, Math.min(1 - normH, state.watermarkState.y));
+  const bounds = getWatermarkCanvasBounds();
+  if (!bounds) return;
+
+  const keep = Math.max(
+    48,
+    Math.min(bounds.w, bounds.h, canvasW, canvasH) * 0.12
+  );
+  const minX = (keep - bounds.w) / canvasW;
+  const maxX = (canvasW - keep) / canvasW;
+  const minY = (keep - bounds.h) / canvasH;
+  const maxY = (canvasH - keep) / canvasH;
+
+  state.watermarkState.x = Math.max(minX, Math.min(maxX, state.watermarkState.x));
+  state.watermarkState.y = Math.max(minY, Math.min(maxY, state.watermarkState.y));
 }
 
 function getWatermarkCanvasBounds() {
   if (!state.watermarkLoaded || !state.watermarkImage) return null;
   const canvasW = els.previewCanvas.width;
   const canvasH = els.previewCanvas.height;
-
-  if (state.watermarkState.stretchFullscreen) {
-    return { x: 0, y: 0, w: canvasW, h: canvasH, right: canvasW, bottom: canvasH };
-  }
 
   const wmAspect =
     state.watermarkImage.naturalWidth / Math.max(1, state.watermarkImage.naturalHeight);
@@ -1326,9 +1331,6 @@ function getWatermarkCanvasBounds() {
 }
 
 function getWatermarkExportSize(outW, outH) {
-  if (state.watermarkState.stretchFullscreen) {
-    return { x: 0, y: 0, w: outW, h: outH };
-  }
   const w = Math.max(16, Math.round(outW * state.watermarkState.scale));
   let h;
   if (state.watermarkState.scaleY != null) {
@@ -1503,7 +1505,8 @@ function onCanvasPointerDown(e) {
     state.drag.offsetY = coords.y - bounds.y;
     els.previewCanvas.setPointerCapture(e.pointerId);
     e.preventDefault();
-  } else if (!state.watermarkState.stretchFullscreen) {
+  } else {
+    // Tap empty area → recentrer le filigrane (y compris hors cadre / plein écran)
     state.watermarkState.x =
       coords.x / els.previewCanvas.width - bounds.w / els.previewCanvas.width / 2;
     state.watermarkState.y =
@@ -1545,7 +1548,6 @@ function onCanvasPointerMove(e) {
   const canvasH = els.previewCanvas.height;
 
   if (state.drag.mode === "move") {
-    if (state.watermarkState.stretchFullscreen) return;
     const newCanvasX = coords.x - state.drag.offsetX;
     const newCanvasY = coords.y - state.drag.offsetY;
 
@@ -2363,29 +2365,23 @@ async function startFFmpegExport() {
         filterComplex = `[0:v]null[v0];[1:v]format=rgba[wm];[v0][wm]overlay=0:0[outv]`;
       }
     } else {
-      // Comportement standard & par défaut : Les overlays sont PUREMENT INFORMATIFS et NE SONT PAS GRAVÉS
-      const watermarkBlob = await getWatermarkBlobForExport();
+      // Bake WYSIWYG (position hors cadre + rotation) into a full-frame PNG
+      updateProgressUI(15, "Composition du filigrane...");
+      const overlayCanvas = await renderWatermarkFrameCanvas(outW, outH);
+      const watermarkBlob = await new Promise((res) =>
+        overlayCanvas.toBlob(res, "image/png")
+      );
       const wmArrayBuffer = await watermarkBlob.arrayBuffer();
       await ffmpeg.writeFile("watermark.png", new Uint8Array(wmArrayBuffer));
 
-      // 3. Translate relative WYSIWYG coordinates into FFmpeg filter_complex
-      updateProgressUI(15, "Construction des filtres vidéo...");
-      const wmBounds = getWatermarkExportSize(outW, outH);
-      const wmTargetW = wmBounds.w;
-      const wmTargetH = wmBounds.h;
-      const posX = wmBounds.x;
-      const posY = wmBounds.y;
-      const opacity = state.watermarkState.opacity.toFixed(2);
-      const stretchScale = `scale=${wmTargetW}:${wmTargetH}`;
-
       if (isDifferent) {
         if (fitMode === "crop") {
-          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH}[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},${stretchScale}[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
+          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH}[v0];[1:v]format=rgba[wm];[v0][wm]overlay=0:0[outv]`;
         } else {
-          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=decrease,pad=${outW}:${outH}:(ow-iw)/2:(oh-ih)/2:black[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},${stretchScale}[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
+          filterComplex = `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=decrease,pad=${outW}:${outH}:(ow-iw)/2:(oh-ih)/2:black[v0];[1:v]format=rgba[wm];[v0][wm]overlay=0:0[outv]`;
         }
       } else {
-        filterComplex = `[0:v]null[v0];[1:v]format=rgba,colorchannelmixer=aa=${opacity},${stretchScale}[wm];[v0][wm]overlay=x=${posX}:y=${posY}[outv]`;
+        filterComplex = `[0:v]null[v0];[1:v]format=rgba[wm];[v0][wm]overlay=0:0[outv]`;
       }
     }
 
@@ -2459,33 +2455,48 @@ async function startFFmpegExport() {
   }
 }
 
+/**
+ * Rasterize the watermark exactly as in the WYSIWYG preview
+ * (scale, overflow outside the frame, rotation, opacity) onto outW×outH.
+ * Pixels outside the frame are clipped — matches "dépasser l'écran".
+ */
+function renderWatermarkFrameCanvas(outW, outH) {
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const c = canvas.getContext("2d");
+  if (!state.watermarkImage) return canvas;
+
+  const bounds = getWatermarkExportSize(outW, outH);
+  c.save();
+  c.globalAlpha = state.watermarkState.opacity;
+  const rot = state.watermarkState.rotation || 0;
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+  if (rot !== 0) {
+    c.translate(cx, cy);
+    c.rotate((rot * Math.PI) / 180);
+    c.drawImage(
+      state.watermarkImage,
+      -bounds.w / 2,
+      -bounds.h / 2,
+      bounds.w,
+      bounds.h
+    );
+  } else {
+    c.drawImage(state.watermarkImage, bounds.x, bounds.y, bounds.w, bounds.h);
+  }
+  c.restore();
+  return canvas;
+}
+
 async function getWatermarkBlobForExport() {
   if (!state.watermarkImage) return state.watermarkFile;
-
-  const canvas = document.createElement("canvas");
-  const img = state.watermarkImage;
-  const rot = state.watermarkState.rotation || 0;
-
-  if (rot !== 0) {
-    const rad = (rot * Math.PI) / 180;
-    const sin = Math.abs(Math.sin(rad));
-    const cos = Math.abs(Math.cos(rad));
-
-    canvas.width = Math.round(img.naturalWidth * cos + img.naturalHeight * sin);
-    canvas.height = Math.round(img.naturalWidth * sin + img.naturalHeight * cos);
-
-    const rCtx = canvas.getContext("2d");
-    rCtx.translate(canvas.width / 2, canvas.height / 2);
-    rCtx.rotate(rad);
-    rCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-  } else {
-    canvas.width = img.naturalWidth || 400;
-    canvas.height = img.naturalHeight || 120;
-    const rCtx = canvas.getContext("2d");
-    rCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  }
-
-  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  const frame = renderWatermarkFrameCanvas(
+    state.exportSettings.targetWidth || els.previewCanvas.width,
+    state.exportSettings.targetHeight || els.previewCanvas.height
+  );
+  return new Promise((resolve) => frame.toBlob(resolve, "image/png"));
 }
 
 function triggerDownload() {

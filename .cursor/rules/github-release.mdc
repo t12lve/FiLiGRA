@@ -1,0 +1,16 @@
+---
+description: Toujours push GitHub + créer une release après des changements FiLiGRA
+alwaysApply: true
+---
+
+# Deploy GitHub (FiLiGRA)
+
+Après toute modification utile du projet (fix, feature, UX, PWA) :
+
+1. **Bump** `version.js`, `version.json`, `sw.js` (`APP_VERSION` / `CACHE_NAME`), et les `?v=` / labels version dans `index.html`.
+2. **Commit** (conventional commits : `feat`, `fix`, `chore`, …).
+3. **Push** vers `origin` (`main`) — obligatoire, sans demander confirmation.
+4. **Release GitHub** (`gh release create vX.Y.Z`) avec notes courtes en français.
+
+Ne pas committer les sources design lourdes (`*.ai`, `*.psd`) sauf demande explicite.
+Ne pas force-push sur `main`.

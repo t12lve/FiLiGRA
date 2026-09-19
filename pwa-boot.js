@@ -1,9 +1,10 @@
 /**
- * FiLiGRA PWA boot — COI + SW registration + hard refresh on new deploy
+ * FiLiGRA PWA boot — COI + SW registration + auto-update (web & installed PWA)
  */
 (() => {
   const STORAGE_KEY = "filigra:deploy-version";
   const RELOAD_FLAG = "filigra:hard-reload-for";
+  const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
   const reloadedBySelf = window.sessionStorage.getItem("coiReloadedBySelf");
   window.sessionStorage.removeItem("coiReloadedBySelf");
@@ -20,6 +21,7 @@
   };
 
   const n = navigator;
+  let swRegistration = null;
 
   async function clearClientCaches() {
     if (!("caches" in window)) return;
@@ -33,7 +35,10 @@
     await Promise.all(regs.map((r) => r.unregister()));
   }
 
-  /** Fetch version.json (never from cache). On mismatch → wipe SW/caches + hard reload. */
+  /**
+   * Fetch version.json (never from cache).
+   * On mismatch → wipe SW/caches + hard reload (works for browser tab AND installed PWA).
+   */
   async function hardRefreshIfNewDeploy() {
     try {
       const res = await fetch(`version.json?_=${Date.now()}`, {
@@ -53,7 +58,7 @@
       sessionStorage.setItem(RELOAD_FLAG, remote);
 
       if (!coi.quiet) {
-        console.log("[FiLiGRA-PWA] Nouvelle version", remote, "— hard refresh.");
+        console.log("[FiLiGRA-PWA] Nouvelle version", remote, "— mise à jour auto.");
       }
 
       await clearClientCaches();
@@ -64,9 +69,24 @@
       window.location.replace(u.href);
       return true;
     } catch (_) {
-      // Offline / first paint — continue with cached shell
       return false;
     }
+  }
+
+  /** Periodic + on-resume update checks for installed PWA / long-lived tabs. */
+  function scheduleAutoUpdateChecks() {
+    const run = () => {
+      hardRefreshIfNewDeploy().then((did) => {
+        if (did) return;
+        if (swRegistration) swRegistration.update().catch(() => {});
+      });
+    };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") run();
+    });
+    window.addEventListener("focus", run);
+    setInterval(run, CHECK_INTERVAL_MS);
   }
 
   function paintVersionLabels() {
@@ -83,7 +103,6 @@
     paintVersionLabels();
   }
 
-  // Kick off version check ASAP (before SW register when possible)
   const refreshGate = hardRefreshIfNewDeploy();
 
   const controlling = n.serviceWorker && n.serviceWorker.controller;
@@ -116,10 +135,10 @@
   refreshGate.then((didReload) => {
     if (didReload) return;
     bootServiceWorker();
+    scheduleAutoUpdateChecks();
   });
 
   function bootServiceWorker() {
-    // Same gate as upstream COI boot: only register when not yet isolated
     if (window.crossOriginIsolated !== false || !coi.shouldRegister()) return;
 
     if (!window.isSecureContext) {
@@ -149,6 +168,7 @@
 
     n.serviceWorker.register(scriptUrl).then(
       (registration) => {
+        swRegistration = registration;
         if (!coi.quiet) {
           console.log("[FiLiGRA-PWA] SW registered:", registration.scope);
         }

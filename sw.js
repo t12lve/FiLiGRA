@@ -2,7 +2,7 @@
  * FiLiGRA Service Worker — shell cache + Cross-Origin Isolation headers
  * CACHE_NAME must change on every release (paired with version.js / version.json).
  */
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 const CACHE_NAME = `filigra-shell-v${APP_VERSION}`;
 const SHELL_ASSETS = [
   "./",
