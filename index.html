@@ -22,31 +22,34 @@
       }
     } catch (e) {}
   </script>
-  <title>FiLiGRA — Watermark & Transcode Studio (PWA)</title>
+  <title>FiLiGRA - Watermark & Transcode Studio (PWA)</title>
   
   <!-- SEO & Search Engine Optimization -->
-  <meta name="description" content="FiLiGRA — Progressive Web App client-side d'incrustation de filigrane, détection de zones sûres pour TikTok, Reels, Shorts et encodage vidéo MP4 H.264 via WebAssembly sans aucun serveur.">
+  <meta name="description" content="FiLiGRA - Progressive Web App client-side d'incrustation de filigrane, détection de zones sûres pour TikTok, Reels, Shorts et encodage vidéo MP4 H.264 via WebAssembly sans aucun serveur.">
   <meta name="keywords" content="FiLiGRA, watermark, filigrane vidéo, transcodage, WebAssembly, FFmpeg wasm, safe zone tiktok, reels instagram, youtube shorts, PWA, privacy-first, T12lve">
   <meta name="author" content="T12lve">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://t12lve.github.io/FiLiGRA/">
   <meta name="theme-color" content="#071018">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#071018">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#071018">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="FiLiGRA">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
 
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://t12lve.github.io/FiLiGRA/">
-  <meta property="og:title" content="FiLiGRA — Watermark & Transcode Studio">
+  <meta property="og:title" content="FiLiGRA - Watermark & Transcode Studio">
   <meta property="og:description" content="Studio vidéo 100% Client-Side WebAssembly. Incrustation de filigrane interactive avec repères UI réseaux sociaux et transcodage ultra-rapide sans serveur.">
   <meta property="og:image" content="https://t12lve.github.io/FiLiGRA/filigra_logo.png">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:url" content="https://t12lve.github.io/FiLiGRA/">
-  <meta name="twitter:title" content="FiLiGRA — Watermark & Transcode Studio">
+  <meta name="twitter:title" content="FiLiGRA - Watermark & Transcode Studio">
   <meta name="twitter:description" content="Studio vidéo 100% Client-Side WebAssembly. Conçu par T12lve.">
   <meta name="twitter:image" content="https://t12lve.github.io/FiLiGRA/filigra_logo.png">
 
@@ -79,11 +82,9 @@
   <link rel="icon" type="image/png" sizes="200x200" href="ico.png">
   <link rel="shortcut icon" type="image/png" href="ico.png">
   <link rel="apple-touch-icon" href="ico.png">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
 
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=1.2.0">
+  <link rel="stylesheet" href="style.css?v=1.3.1">
 
   <!-- FFmpeg.wasm & Util CDN Imports -->
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
@@ -501,9 +502,9 @@
             </div>
             <input type="range" id="sliderCrf" min="18" max="32" step="1" value="23" aria-label="Curseur CRF de compression">
             <div class="quality-labels">
-              <span>18 — Sans perte visuelle</span>
-              <span>23 — Optimal</span>
-              <span>32 — Forte compression</span>
+              <span>18 - Sans perte visuelle</span>
+              <span>23 - Optimal</span>
+              <span>32 - Forte compression</span>
             </div>
           </div>
 
@@ -628,10 +629,16 @@
               </svg>
               <span>Vidéo encodée avec succès !</span>
             </div>
-            <button type="button" class="btn-download-again" id="btnDownloadAgain">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Re-télécharger
-            </button>
+            <div class="success-actions">
+              <button type="button" class="btn-share-video" id="btnShareVideo" hidden title="Partager ou enregistrer directement dans l’application Photos">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                Partager / Photos
+              </button>
+              <button type="button" class="btn-download-again" id="btnDownloadAgain">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Re-télécharger
+              </button>
+            </div>
           </div>
 
           <!-- Live Terminal / Logs Console Accordion -->
@@ -710,22 +717,69 @@
     <div class="drawer-scroll-body">
       <section class="drawer-panel-section" aria-label="Aide">
         <div class="help-install-block" id="helpInstallBlock">
-          <h3 class="help-menu-title">Installer l’app</h3>
-          <p class="help-install-desc">Ajoutez FiLiGRA à l’écran d’accueil — sans App Store ni Play Store.</p>
+          <div class="help-install-header">
+            <h3 class="help-menu-title">Installer l’application</h3>
+            <span class="pwa-browser-badge" id="pwaBrowserBadge" title="Navigateur détecté">PWA Ready</span>
+          </div>
+          <p class="help-install-desc">Utilisez FiLiGRA en plein écran sans barre d’adresse, hors-ligne et sans passer par un App Store.</p>
+          
           <button type="button" class="btn-install-pwa" id="btnInstallPwa">
-            Installer FiLiGRA
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span id="btnInstallPwaText">Installer FiLiGRA</span>
           </button>
-          <div class="help-install-ios" id="helpInstallIos" hidden>
-            <ol>
-              <li>Appuyez sur <strong>Partager</strong> dans Safari</li>
-              <li>Choisissez <strong>Sur l’écran d’accueil</strong></li>
-              <li>Validez <strong>Ajouter</strong></li>
+
+          <!-- Selecteur d'onglets navigateurs pour consulter les consignes -->
+          <div class="pwa-guide-tabs" id="pwaGuideTabs">
+            <button type="button" class="pwa-tab-btn is-active" data-pwa-tab="ios" aria-label="Safari iOS">iOS / Safari</button>
+            <button type="button" class="pwa-tab-btn" data-pwa-tab="safari-mac" aria-label="Safari Mac">Safari Mac</button>
+            <button type="button" class="pwa-tab-btn" data-pwa-tab="firefox" aria-label="Firefox">Firefox</button>
+            <button type="button" class="pwa-tab-btn" data-pwa-tab="chromium" aria-label="Chrome et Edge">Chrome / Edge</button>
+          </div>
+
+          <!-- Guide Safari iOS / iPadOS -->
+          <div class="pwa-tab-pane is-active" id="panePwaIos">
+            <ol class="pwa-steps-list">
+              <li>Touchez le bouton <strong>Partager</strong> <span class="ios-share-badge" aria-label="Icône Partager Safari">⎋</span> (carré avec flèche vers le haut).</li>
+              <li>Faites défiler la feuille et touchez <strong>Sur l’écran d’accueil</strong>.</li>
+              <li>Confirmez en appuyant sur <strong>Ajouter</strong> en haut à droite.</li>
+            </ol>
+            <p class="pwa-tab-note">💡 Sur iPadOS, le bouton Partager se trouve en haut à droite de Safari.</p>
+          </div>
+
+          <!-- Guide Safari macOS Sonoma+ -->
+          <div class="pwa-tab-pane" id="panePwaSafariMac" hidden>
+            <ol class="pwa-steps-list">
+              <li>Dans Safari, cliquez sur le menu <strong>Fichier</strong> en haut.</li>
+              <li>Cliquez sur <strong>Ajouter au Dock…</strong> (ou bouton Partager ➔ Ajouter au Dock).</li>
+              <li>Cliquez sur <strong>Ajouter</strong> : FiLiGRA apparaît dans le Dock et s’exécute dans sa fenêtre dédiée.</li>
             </ol>
           </div>
-          <p class="help-install-fallback" id="helpInstallFallback" hidden>
-            Si le bouton ne lance rien : menu du navigateur → <strong>Installer l’application</strong> (Chrome / Edge).
+
+          <!-- Guide Firefox Android & Desktop -->
+          <div class="pwa-tab-pane" id="panePwaFirefox" hidden>
+            <div class="firefox-guide-section">
+              <strong class="guide-subtitle">Sur Firefox Android :</strong>
+              <ol class="pwa-steps-list">
+                <li>Appuyez sur le menu <strong>(⋮)</strong> à côté de la barre d’adresse.</li>
+                <li>Appuyez sur <strong>Installer</strong> ou <strong>Ajouter à l’écran d’accueil</strong>.</li>
+              </ol>
+            </div>
+            <div class="firefox-guide-section" style="margin-top: 10px;">
+              <strong class="guide-subtitle">Sur Firefox Ordinateur :</strong>
+              <p class="pwa-tab-note">Firefox bureau ne supporte plus les fenêtres autonomes PWA. Ajoutez la page en favori (<kbd>Ctrl+D</kbd> / <kbd>Cmd+D</kbd>) ou utilisez Safari, Chrome ou Edge pour une fenêtre autonome dédiée.</p>
+            </div>
+          </div>
+
+          <!-- Guide Chrome / Edge / Brave -->
+          <div class="pwa-tab-pane" id="panePwaChromium" hidden>
+            <p class="help-install-fallback" id="helpInstallFallback">
+              Si le bouton d’installation ne réagit pas : menu du navigateur (⋮) → <strong>Installer l’application</strong> ou icône <strong>⊕</strong> dans la barre d’adresse.
+            </p>
+          </div>
+
+          <p class="help-install-done" id="helpInstallDone" hidden>
+            ✓ FiLiGRA est active en mode application autonome (PWA).
           </p>
-          <p class="help-install-done" id="helpInstallDone" hidden>FiLiGRA est déjà ouverte en mode application.</p>
         </div>
 
         <h3 class="help-menu-title">Aide</h3>
@@ -797,7 +851,7 @@
     <span id="toastMessage">Notification</span>
   </div>
 
-  <!-- Burger menu — wired inline so it works even if app.js / CDN hang -->
+  <!-- Burger menu - wired inline so it works even if app.js / CDN hang -->
   <script>
     window.filigraToggleBurger = function (force) {
       var drawer = document.getElementById("burgerDrawer");
@@ -808,7 +862,7 @@
       drawer.classList.toggle("open", open);
       backdrop.classList.toggle("open", open);
       document.body.classList.toggle("burger-open", open);
-      // Hard reset — no transform games
+      // Hard reset - no transform games
       drawer.style.transform = "none";
       drawer.style.display = open ? "flex" : "none";
       backdrop.setAttribute("aria-hidden", open ? "false" : "true");
@@ -845,10 +899,36 @@
         });
       }
       document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") window.filigraToggleBurger(false);
+        if (e.key === "Escape") {
+          window.filigraToggleBurger(false);
+          const modal = document.getElementById("pwaModalBackdrop");
+          if (modal) modal.hidden = true;
+        }
       });
     });
   </script>
-  <script type="module" src="app.js?v=1.2.0"></script>
+
+  <!-- PWA Install Modal Guide (Safari iOS, Safari Mac, Firefox, Chromium) -->
+  <div class="pwa-modal-backdrop" id="pwaModalBackdrop" aria-hidden="true" hidden>
+    <div class="pwa-modal-card" role="dialog" aria-modal="true" aria-labelledby="pwaModalTitle">
+      <div class="pwa-modal-header">
+        <div class="pwa-modal-title-group">
+          <div class="card-icon-badge">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </div>
+          <h3 id="pwaModalTitle">Installation de FiLiGRA</h3>
+        </div>
+        <button type="button" class="btn-drawer-close" id="btnClosePwaModal" aria-label="Fermer">✕</button>
+      </div>
+      <div class="pwa-modal-body" id="pwaModalBody">
+        <!-- Content will be populated dynamically -->
+      </div>
+      <div class="pwa-modal-footer">
+        <button type="button" class="btn-pwa-modal-ok" id="btnOkPwaModal">J’ai compris</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js?v=1.3.1"></script>
 </body>
 </html>

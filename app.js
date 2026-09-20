@@ -1,5 +1,5 @@
 /**
- * FiLiGRA — Watermark & Transcode Studio (PWA)
+ * FiLiGRA - Watermark & Transcode Studio (PWA)
  * Complete Application Logic, WYSIWYG Canvas Editor & FFmpeg.wasm Pipeline
  */
 
@@ -248,9 +248,16 @@ const els = {
 
   // PWA install / help
   btnInstallPwa: document.getElementById("btnInstallPwa"),
-  helpInstallIos: document.getElementById("helpInstallIos"),
+  btnInstallPwaText: document.getElementById("btnInstallPwaText"),
+  pwaBrowserBadge: document.getElementById("pwaBrowserBadge"),
+  pwaGuideTabs: document.getElementById("pwaGuideTabs"),
   helpInstallDone: document.getElementById("helpInstallDone"),
   helpInstallFallback: document.getElementById("helpInstallFallback"),
+  pwaModalBackdrop: document.getElementById("pwaModalBackdrop"),
+  pwaModalBody: document.getElementById("pwaModalBody"),
+  btnClosePwaModal: document.getElementById("btnClosePwaModal"),
+  btnOkPwaModal: document.getElementById("btnOkPwaModal"),
+  btnShareVideo: document.getElementById("btnShareVideo"),
 
   // Display preference
   chkForceDesktop: document.getElementById("chkForceDesktop"),
@@ -269,7 +276,7 @@ let progressTimerInterval = null;
 // 4. Initialization & COOP/COEP Verification
 // ---------------------------------------------------------------------------
 window.addEventListener("DOMContentLoaded", () => {
-  // UI first — never block the burger / dock behind a CDN hang.
+  // UI first - never block the burger / dock behind a CDN hang.
   checkIsolationStatus();
   initEventListeners();
   initPwaInstall();
@@ -531,7 +538,7 @@ function initEventListeners() {
   };
 
   els.btnBrowseVideo.addEventListener("click", openVideoPicker);
-  // Clic sur la zone (pas sur le bouton — sinon double .click() qui annule le dialog)
+  // Clic sur la zone (pas sur le bouton - sinon double .click() qui annule le dialog)
   els.videoDropzone.addEventListener("click", (e) => {
     if (e.target.closest("#btnBrowseVideo")) return;
     openVideoPicker(e);
@@ -700,6 +707,11 @@ function initEventListeners() {
   els.btnDownloadAgain.addEventListener("click", () => {
     autoSaveOrDownload(state.lastExportBlob, state.lastExportFilename);
   });
+  if (els.btnShareVideo) {
+    els.btnShareVideo.addEventListener("click", () => {
+      shareExportedVideo();
+    });
+  }
 
   if (els.btnAddToQueue && els.queueFileInput) {
     els.btnAddToQueue.addEventListener("click", () => els.queueFileInput.click());
@@ -739,7 +751,7 @@ function initEventListeners() {
     els.iconChevronConsole.style.transform = isVisible ? "rotate(-90deg)" : "rotate(0deg)";
   });
 
-  // Burger Menu — handlers live in the inline script (index.html).
+  // Burger Menu - handlers live in the inline script (index.html).
   // Keep a thin bridge so Escape / mobile sheets stay in sync.
   // (Do not re-bind click here or the drawer would toggle twice.)
 
@@ -837,28 +849,205 @@ function closeAllMobileDrawers() {
 
 let deferredInstallPrompt = null;
 
+function isIosDevice() {
+  const ua = window.navigator.userAgent || "";
+  if (/iphone|ipad|ipod/i.test(ua)) return true;
+  // Modern iPadOS 13+ reports as MacIntel with touch points
+  if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true;
+  return false;
+}
+
+function isMacDevice() {
+  const ua = window.navigator.userAgent || "";
+  return /macintosh|mac os x/i.test(ua) && !isIosDevice();
+}
+
+function isAndroidDevice() {
+  return /android/i.test(window.navigator.userAgent || "");
+}
+
+function isFirefoxBrowser() {
+  const ua = window.navigator.userAgent || "";
+  return /firefox|fxios/i.test(ua);
+}
+
+function isSafariBrowser() {
+  const ua = window.navigator.userAgent || "";
+  const isWebKit = /webkit/i.test(ua);
+  const isOther = /chrome|crios|firefox|fxios|edg|opr|opera|samsung/i.test(ua);
+  return isWebKit && !isOther;
+}
+
 function isStandaloneDisplay() {
   return (
     window.matchMedia("(display-mode: standalone)").matches ||
-    window.navigator.standalone === true
+    window.matchMedia("(display-mode: fullscreen)").matches ||
+    window.matchMedia("(display-mode: minimal-ui)").matches ||
+    window.navigator.standalone === true ||
+    (document.referrer && document.referrer.includes("android-app://"))
   );
 }
 
-function isIosDevice() {
-  return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+function getPlatformPwaInfo() {
+  if (isIosDevice()) {
+    return {
+      key: "ios",
+      badge: "Safari iOS",
+      title: "Installer FiLiGRA sur iOS & iPadOS",
+      steps: [
+        "Touchez le bouton <strong>Partager</strong> <span class=\"ios-share-badge\">⎋</span> (carré avec flèche vers le haut dans Safari).",
+        "Faites défiler le menu et appuyez sur <strong>Sur l’écran d’accueil</strong>.",
+        "Confirmez en touchant <strong>Ajouter</strong> en haut à droite.",
+      ],
+      note: "💡 FiLiGRA s’exécutera comme une application native sans barre d’adresse Safari.",
+    };
+  }
+  if (isSafariBrowser() && isMacDevice()) {
+    return {
+      key: "safari-mac",
+      badge: "Safari macOS",
+      title: "Installer sur Mac (Safari Sonoma+)",
+      steps: [
+        "Dans la barre de menus de Safari, cliquez sur <strong>Fichier</strong>.",
+        "Sélectionnez <strong>Ajouter au Dock…</strong> (ou bouton Partager ➔ Ajouter au Dock).",
+        "Cliquez sur <strong>Ajouter</strong> pour placer l’icône dans le Dock de votre Mac.",
+      ],
+      note: "💡 FiLiGRA s’ouvrira alors dans sa propre fenêtre autonome dédiée.",
+    };
+  }
+  if (isFirefoxBrowser()) {
+    if (isAndroidDevice()) {
+      return {
+        key: "firefox",
+        badge: "Firefox Android",
+        title: "Installer sur Firefox Android",
+        steps: [
+          "Appuyez sur le menu <strong>(⋮)</strong> à droite de l'adresse.",
+          "Appuyez sur <strong>Installer</strong> ou <strong>Ajouter à l’écran d’accueil</strong>.",
+        ],
+        note: "💡 L’application sera immédiatement ajoutée à votre lanceur.",
+      };
+    }
+    return {
+      key: "firefox",
+      badge: "Firefox Desktop",
+      title: "FiLiGRA sur Firefox Ordinateur",
+      steps: [
+        "Firefox bureau ne gère plus l'affichage en fenêtre autonome sans barre de navigation.",
+        "Pour un accès rapide : ajoutez la page à vos marque-pages avec <kbd>Ctrl+D</kbd> (ou <kbd>Cmd+D</kbd>).",
+      ],
+      note: "💡 Pour une application autonome avec fenêtre dédiée, vous pouvez utiliser Safari (Mac), Chrome ou Edge.",
+    };
+  }
+  return {
+    key: "chromium",
+    badge: "Chrome / Edge",
+    title: "Installer sur Chrome & Edge",
+    steps: [
+      "Cliquez sur <strong>Installer FiLiGRA</strong> ou cliquez sur l’icône <strong>⊕</strong> dans la barre d'adresse.",
+      "Si le bouton ne réagit pas : ouvrez le menu du navigateur (⋮) ➔ <strong>Installer l’application</strong>.",
+    ],
+    note: "💡 Installation immédiate avec accélération matérielle complète.",
+  };
+}
+
+function openPwaInstallModal(info) {
+  const p = info || getPlatformPwaInfo();
+  if (!els.pwaModalBackdrop || !els.pwaModalBody) return;
+
+  const titleEl = document.getElementById("pwaModalTitle");
+  if (titleEl) titleEl.textContent = p.title;
+
+  const stepsHtml = p.steps
+    .map(
+      (step, idx) => `
+      <div class="pwa-guide-step-card">
+        <span class="step-num">${idx + 1}</span>
+        <div class="step-desc">${step}</div>
+      </div>`
+    )
+    .join("");
+
+  els.pwaModalBody.innerHTML = `
+    <div class="pwa-modal-steps-container">
+      ${stepsHtml}
+      ${p.note ? `<p class="pwa-guide-footnote">${p.note}</p>` : ""}
+    </div>
+  `;
+
+  els.pwaModalBackdrop.hidden = false;
+}
+
+function closePwaInstallModal() {
+  if (els.pwaModalBackdrop) {
+    els.pwaModalBackdrop.hidden = true;
+  }
 }
 
 function initPwaInstall() {
   const btn = els.btnInstallPwa;
-  const iosBox = els.helpInstallIos;
   const done = els.helpInstallDone;
-  const fallback = els.helpInstallFallback;
+  const platform = getPlatformPwaInfo();
+
+  if (els.pwaBrowserBadge) {
+    els.pwaBrowserBadge.textContent = platform.badge;
+  }
+
+  // Close handlers for modal
+  if (els.btnClosePwaModal) {
+    els.btnClosePwaModal.addEventListener("click", closePwaInstallModal);
+  }
+  if (els.btnOkPwaModal) {
+    els.btnOkPwaModal.addEventListener("click", closePwaInstallModal);
+  }
+  if (els.pwaModalBackdrop) {
+    els.pwaModalBackdrop.addEventListener("click", (e) => {
+      if (e.target === els.pwaModalBackdrop) closePwaInstallModal();
+    });
+  }
+
+  // Drawer browser tabs
+  const tabButtons = document.querySelectorAll(".pwa-tab-btn");
+  const tabPanes = {
+    ios: document.getElementById("panePwaIos"),
+    "safari-mac": document.getElementById("panePwaSafariMac"),
+    firefox: document.getElementById("panePwaFirefox"),
+    chromium: document.getElementById("panePwaChromium"),
+  };
+
+  const switchTab = (tabKey) => {
+    tabButtons.forEach((b) => {
+      b.classList.toggle("is-active", b.getAttribute("data-pwa-tab") === tabKey);
+    });
+    Object.entries(tabPanes).forEach(([k, pane]) => {
+      if (pane) {
+        pane.hidden = k !== tabKey;
+        pane.classList.toggle("is-active", k === tabKey);
+      }
+    });
+  };
+
+  tabButtons.forEach((b) => {
+    b.addEventListener("click", () => {
+      const key = b.getAttribute("data-pwa-tab");
+      switchTab(key);
+    });
+  });
+
+  // Activate detected browser tab by default
+  switchTab(platform.key);
 
   const showInstalled = () => {
     if (btn) btn.hidden = true;
-    if (iosBox) iosBox.hidden = true;
-    if (fallback) fallback.hidden = true;
+    if (els.pwaGuideTabs) els.pwaGuideTabs.hidden = true;
+    Object.values(tabPanes).forEach((p) => {
+      if (p) p.hidden = true;
+    });
     if (done) done.hidden = false;
+    if (els.pwaBrowserBadge) {
+      els.pwaBrowserBadge.textContent = "PWA Active";
+      els.pwaBrowserBadge.classList.add("is-standalone");
+    }
   };
 
   if (isStandaloneDisplay()) {
@@ -867,18 +1056,7 @@ function initPwaInstall() {
   }
 
   if (done) done.hidden = true;
-  // Le bouton reste toujours visible hors mode installé / iOS
   if (btn) btn.hidden = false;
-
-  if (isIosDevice()) {
-    if (btn) btn.hidden = true;
-    if (iosBox) iosBox.hidden = false;
-    if (fallback) fallback.hidden = true;
-  } else {
-    if (iosBox) iosBox.hidden = true;
-    // Consigne manuelle visible tant que le prompt natif n'est pas capturé
-    if (fallback) fallback.hidden = false;
-  }
 
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
@@ -886,9 +1064,8 @@ function initPwaInstall() {
     if (btn) {
       btn.hidden = false;
       btn.disabled = false;
-      btn.textContent = "Installer FiLiGRA";
+      if (els.btnInstallPwaText) els.btnInstallPwaText.textContent = "Installer FiLiGRA";
     }
-    if (fallback) fallback.hidden = true;
   });
 
   window.addEventListener("appinstalled", () => {
@@ -903,18 +1080,12 @@ function initPwaInstall() {
         deferredInstallPrompt.prompt();
         const choice = await deferredInstallPrompt.userChoice;
         deferredInstallPrompt = null;
-        if (choice.outcome === "accepted") {
+        if (choice && choice.outcome === "accepted") {
           showInstalled();
         }
         return;
       }
-      if (isIosDevice()) {
-        if (iosBox) iosBox.hidden = false;
-        showToast("Sur iOS : Partager → Sur l’écran d’accueil");
-        return;
-      }
-      if (fallback) fallback.hidden = false;
-      showToast("Ouvrez le menu du navigateur → Installer l’application");
+      openPwaInstallModal(platform);
     });
   }
 }
@@ -960,7 +1131,7 @@ function handleVideoSelect(e) {
 function isVideoFile(file) {
   if (!file) return false;
   if (file.type && file.type.startsWith("video/")) return true;
-  // Windows / certains navigateurs laissent type vide — on se rabat sur l'extension
+  // Windows / certains navigateurs laissent type vide - on se rabat sur l'extension
   return /\.(mp4|mov|webm|mkv|m4v|avi|mpeg|mpg|ogv)$/i.test(file.name || "");
 }
 
@@ -1278,7 +1449,7 @@ function applyWatermarkFullscreen(announce = false) {
   updateAnchorButtonsUI();
   renderCanvas();
   if (announce) {
-    showToast("Plein écran — déplacez / pivotez pour dépasser le cadre");
+    showToast("Plein écran - déplacez / pivotez pour dépasser le cadre");
     appendLog("[Filigrane] Plein écran : débordement et rotation autorisés.");
   }
 }
@@ -1406,7 +1577,7 @@ function getWatermarkExportSize(outW, outH) {
   return { x, y, w, h };
 }
 
-/** Desktop (souris) vs mobile/tactile — pas basé sur la largeur fenêtre seule. */
+/** Desktop (souris) vs mobile/tactile - pas basé sur la largeur fenêtre seule. */
 function isTouchUi(pointerType) {
   if (pointerType === "touch") return true;
   if (typeof window.matchMedia !== "function") return false;
@@ -2404,7 +2575,7 @@ function updateExportDirLabel() {
 
 async function pickExportDirectory() {
   if (!window.showDirectoryPicker) {
-    showToast("Choix de dossier non supporté — utilisez Chrome, Edge ou la PWA.");
+    showToast("Choix de dossier non supporté - utilisez Chrome, Edge ou la PWA.");
     return;
   }
   try {
@@ -2462,13 +2633,55 @@ async function autoSaveOrDownload(blob, filename) {
     }
   } catch (err) {
     console.warn("[FiLiGRA] auto-save:", err);
-    appendLog(`[Auto-save] Échec dossier — fallback téléchargement (${err.message || err})`);
+    appendLog(`[Auto-save] Échec dossier - fallback téléchargement (${err.message || err})`);
   }
   if (state.lastExportUrl) URL.revokeObjectURL(state.lastExportUrl);
   state.lastExportUrl = URL.createObjectURL(blob);
   state.lastExportBlob = blob;
   state.lastExportFilename = filename;
+
+  // Verify Web Share API capability (Safari iOS, Android, macOS)
+  updateShareButtonVisibility(blob, filename);
+
   triggerDownload();
+}
+
+async function updateShareButtonVisibility(blob, filename) {
+  if (!els.btnShareVideo) return;
+  if (!navigator.share || !navigator.canShare || !blob) {
+    els.btnShareVideo.hidden = true;
+    return;
+  }
+  try {
+    const file = new File([blob], filename || "video.mp4", { type: "video/mp4" });
+    const canShare = navigator.canShare({ files: [file] });
+    els.btnShareVideo.hidden = !canShare;
+  } catch (_) {
+    els.btnShareVideo.hidden = true;
+  }
+}
+
+async function shareExportedVideo() {
+  if (!state.lastExportBlob) return;
+  const filename = state.lastExportFilename || "FiLiGRA_video.mp4";
+  try {
+    const file = new File([state.lastExportBlob], filename, { type: "video/mp4" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        title: "FiLiGRA Studio",
+        text: `Vidéo traitée avec FiLiGRA (${filename})`,
+        files: [file],
+      });
+      showToast("Vidéo partagée avec succès !");
+    } else {
+      triggerDownload();
+    }
+  } catch (err) {
+    if (err && err.name !== "AbortError") {
+      console.warn("[FiLiGRA] Share error:", err);
+      triggerDownload();
+    }
+  }
 }
 
 function snapshotForQueue() {
@@ -2508,7 +2721,7 @@ function enqueueVideoFiles(files) {
   }
   renderQueueList();
   showToast(`${added} vidéo${added > 1 ? "s" : ""} ajoutée${added > 1 ? "s" : ""} à la file`);
-  appendLog(`[File] +${added} — total ${state.encodeQueue.filter((j) => j.status === "pending").length} en attente`);
+  appendLog(`[File] +${added} - total ${state.encodeQueue.filter((j) => j.status === "pending").length} en attente`);
 }
 
 function renderQueueList() {
@@ -2822,7 +3035,7 @@ async function startFFmpegExport(options = {}) {
 /**
  * Rasterize the watermark exactly as in the WYSIWYG preview
  * (scale, overflow outside the frame, rotation, opacity) onto outW×outH.
- * Pixels outside the frame are clipped — matches "dépasser l'écran".
+ * Pixels outside the frame are clipped - matches "dépasser l'écran".
  */
 function renderWatermarkFrameCanvas(outW, outH) {
   const canvas = document.createElement("canvas");
@@ -2868,9 +3081,15 @@ function triggerDownload() {
   const a = document.createElement("a");
   a.href = state.lastExportUrl;
   a.download = state.lastExportFilename;
+  a.target = "_blank";
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  setTimeout(() => {
+    try {
+      document.body.removeChild(a);
+    } catch (_) {}
+  }, 400);
 }
 
 function updateProgressUI(percent, statusMessage) {

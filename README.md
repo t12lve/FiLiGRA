@@ -1,10 +1,10 @@
-# FiLiGRA — Watermark & Transcode Studio
+# FiLiGRA - Watermark & Transcode Studio
 
 <div align="center">
 
 ![FiLiGRA Banner](filigra_logo.png)
 
-**Studio vidéo 100% Client-Side WebAssembly (PWA) — Aucun serveur, confidentialité totale.**
+**Studio vidéo 100% Client-Side WebAssembly (PWA) - Aucun serveur, confidentialité totale.**
 
 [![WebAssembly](https://img.shields.io/badge/WebAssembly-FFmpeg.wasm_v0.12-00F5FF?style=for-the-badge&logo=webassembly&logoColor=black)](https://ffmpegwasm.netlify.app/)
 [![PWA Ready](https://img.shields.io/badge/PWA-Installable-BF5FFF?style=for-the-badge&logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
@@ -109,4 +109,5 @@ npx serve .
 Vibecodé avec passion en Septembre 2026 par **T12lve**.
 
 - **Instagram** : [@t12lve](https://instagram.com/t12lve)
-- **Licence** : MIT — Libre d'utilisation personnelle et commerciale.
+- **Licence** : MIT - Libre d'utilisation personnelle et commerciale.
+- **Changelog** : [Historique des versions](CHANGELOG.md)

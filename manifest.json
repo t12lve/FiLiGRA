@@ -1,13 +1,18 @@
 {
-  "name": "FiLiGRA — Watermark & Transcode Studio",
+  "$schema": "https://json.schemastore.org/web-manifest-combined.json",
+  "id": "./index.html",
+  "name": "FiLiGRA - Watermark & Transcode Studio",
   "short_name": "FiLiGRA",
   "description": "Studio client-side d'incrustation de filigrane et d'encodage vidéo MP4 H.264 propulsé par WebAssembly.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "window-controls-overlay"],
   "background_color": "#071018",
   "theme_color": "#071018",
   "orientation": "any",
+  "lang": "fr",
+  "dir": "ltr",
   "icons": [
     {
       "src": "ico.png",
@@ -28,5 +33,6 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["video", "utilities", "multimedia"]
+  "categories": ["video", "utilities", "multimedia", "productivity"]
 }
+

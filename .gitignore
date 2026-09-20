@@ -15,7 +15,9 @@ _*.py
 
 # Large design sources (keep exported PNG)
 *.ai
+*.psd
 
 # Optional local caches
 .cache/
 node_modules/
+DESIGN.md

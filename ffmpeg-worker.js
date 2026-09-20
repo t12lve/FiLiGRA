@@ -1,5 +1,5 @@
 /**
- * FiLiGRA — Self-Hosted Local FFmpeg Web Worker
+ * FiLiGRA - Self-Hosted Local FFmpeg Web Worker
  * Solves browser Cross-Origin Worker restrictions on GitHub Pages and localhost.
  */
 

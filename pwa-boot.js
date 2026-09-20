@@ -1,5 +1,5 @@
 /**
- * FiLiGRA PWA boot — COI + SW registration + auto-update (web & installed PWA)
+ * FiLiGRA PWA boot - COI + SW registration + auto-update (web & installed PWA)
  */
 (() => {
   const STORAGE_KEY = "filigra:deploy-version";
@@ -58,7 +58,7 @@
       sessionStorage.setItem(RELOAD_FLAG, remote);
 
       if (!coi.quiet) {
-        console.log("[FiLiGRA-PWA] Nouvelle version", remote, "— mise à jour auto.");
+        console.log("[FiLiGRA-PWA] Nouvelle version", remote, "- mise à jour auto.");
       }
 
       await clearClientCaches();
@@ -90,7 +90,7 @@
   }
 
   function paintVersionLabels() {
-    const v = window.FILIGRA_VERSION || localStorage.getItem(STORAGE_KEY) || "—";
+    const v = window.FILIGRA_VERSION || localStorage.getItem(STORAGE_KEY) || "-";
     const label = v.charAt(0) === "v" ? v : "v" + v;
     document.querySelectorAll("[data-filigra-version]").forEach((el) => {
       el.textContent = label;
@@ -139,7 +139,7 @@
   });
 
   function bootServiceWorker() {
-    if (window.crossOriginIsolated !== false || !coi.shouldRegister()) return;
+    if (!coi.shouldRegister()) return;
 
     if (!window.isSecureContext) {
       if (!coi.quiet) {
@@ -161,7 +161,7 @@
     n.serviceWorker.addEventListener("controllerchange", () => {
       if (refreshing) return;
       refreshing = true;
-      if (!coi.quiet) console.log("[FiLiGRA-PWA] Nouveau SW actif — reload.");
+      if (!coi.quiet) console.log("[FiLiGRA-PWA] Nouveau SW actif - reload.");
       window.sessionStorage.setItem("coiReloadedBySelf", "controllerchange");
       coi.doReload();
     });
@@ -184,13 +184,14 @@
               n.serviceWorker.controller
             ) {
               installing.postMessage({ type: "SKIP_WAITING" });
-              if (!coi.quiet) console.log("[FiLiGRA-PWA] SW update — skipWaiting.");
+              if (!coi.quiet) console.log("[FiLiGRA-PWA] SW update - skipWaiting.");
             }
           });
         });
 
-        if (registration.active && !n.serviceWorker.controller) {
-          if (!coi.quiet) console.log("[FiLiGRA-PWA] Taking control — reload.");
+        // First-run isolation activation: reload only if not yet isolated
+        if (!window.crossOriginIsolated && registration.active && !n.serviceWorker.controller) {
+          if (!coi.quiet) console.log("[FiLiGRA-PWA] Taking control for Cross-Origin Isolation - reload.");
           window.sessionStorage.setItem("coiReloadedBySelf", "notcontrolling");
           coi.doReload();
         }

@@ -1,8 +1,8 @@
 /**
- * FiLiGRA Service Worker — shell cache + Cross-Origin Isolation headers
+ * FiLiGRA Service Worker - shell cache + Cross-Origin Isolation headers
  * CACHE_NAME must change on every release (paired with version.js / version.json).
  */
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.1";
 const CACHE_NAME = `filigra-shell-v${APP_VERSION}`;
 const SHELL_ASSETS = [
   "./",
@@ -14,6 +14,11 @@ const SHELL_ASSETS = [
   "./version.json",
   "./manifest.json",
   "./ico.png",
+  "./apple-touch-icon.png",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./icon-512-maskable.png",
+  "./icon.svg",
   "./filigra_logo.png",
 ];
 
@@ -60,31 +65,53 @@ self.addEventListener("message", (ev) => {
   }
 });
 
+/**
+ * Attaches Cross-Origin Isolation headers to responses.
+ * Specifically hardened for Safari and Firefox to avoid TypeError on 204/304 statuses
+ * where response body must strictly be null.
+ */
 function withCoiHeaders(response) {
-  if (response.status === 0) return response;
-  const newHeaders = new Headers(response.headers);
-  newHeaders.set(
-    "Cross-Origin-Embedder-Policy",
-    coepCredentialless ? "credentialless" : "require-corp"
-  );
-  if (!coepCredentialless) {
-    newHeaders.set("Cross-Origin-Resource-Policy", "cross-origin");
+  if (!response || response.status === 0 || response.type === "opaque") {
+    return response;
   }
-  newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
-  // Encourage browsers / CDNs not to keep stale HTML/JS after a deploy
-  if (response.url && /\.(html|js|css|json)(\?|$)/i.test(response.url)) {
-    newHeaders.set("Cache-Control", "no-cache, must-revalidate");
+
+  // HTTP 101, 204, 205, 304 cannot have a body per Fetch spec (causes TypeError in Firefox & Safari)
+  const noBodyStatus = [101, 204, 205, 304].includes(response.status);
+  const body = noBodyStatus || response.bodyUsed ? null : response.body;
+
+  try {
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set(
+      "Cross-Origin-Embedder-Policy",
+      coepCredentialless ? "credentialless" : "require-corp"
+    );
+    if (!coepCredentialless) {
+      newHeaders.set("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+    newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
+    // Encourage browsers / CDNs not to keep stale HTML/JS after a deploy
+    if (response.url && /\.(html|js|css|json)(\?|$)/i.test(response.url)) {
+      newHeaders.set("Cache-Control", "no-cache, must-revalidate");
+    }
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: newHeaders,
+    });
+  } catch (err) {
+    console.warn("[FiLiGRA-SW] withCoiHeaders fallback:", err);
+    return response;
   }
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: newHeaders,
-  });
 }
 
 self.addEventListener("fetch", (event) => {
   const r = event.request;
   if (r.cache === "only-if-cached" && r.mode !== "same-origin") {
+    return;
+  }
+
+  // Safari Range requests bypass service worker synthetic response to preserve byte streaming
+  if (r.headers.has("range")) {
     return;
   }
 
@@ -103,12 +130,12 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(isVersionProbe ? new Request(request, { cache: "no-store" }) : request)
       .then((response) => {
-        const stamped = withCoiHeaders(response.clone());
+        let copy = null;
         if (isShellGet && response.ok && !isVersionProbe) {
-          const copy = response.clone();
+          copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(r, copy)).catch(() => {});
         }
-        return stamped;
+        return withCoiHeaders(response);
       })
       .catch(async () => {
         if (!isShellGet) return undefined;
@@ -122,3 +149,4 @@ self.addEventListener("fetch", (event) => {
       })
   );
 });
+
