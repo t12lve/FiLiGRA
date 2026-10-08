@@ -50,9 +50,27 @@ async function ensureFFmpegDependencies() {
 // 2. Application State
 // ---------------------------------------------------------------------------
 const state = {
-  // Video Source
+  // Media Source (Video or Image)
+  mediaType: null, // 'video' | 'image'
   videoFile: null,
   videoUrl: null,
+  imageFile: null,
+  imageUrl: null,
+  imageElement: null,
+  imageMeta: {
+    name: "",
+    width: 0,
+    height: 0,
+    sizeBytes: 0,
+    format: "PNG",
+    aspectRatio: "1:1",
+    aspectRatioVal: 1,
+  },
+  imageExportSettings: {
+    scalePercent: 100, // 10% to 200%, default 100%
+    format: "original", // 'original' | 'png' | 'jpeg' | 'webp'
+    quality: 1.0, // default 1.0 (100% maximum quality)
+  },
   videoMeta: {
     name: "",
     width: 0,
@@ -145,6 +163,10 @@ const els = {
   btnCloseBurger: document.getElementById("btnCloseBurger"),
 
   // Video Stage & Overlay Toolbar
+  stageCardTitle: document.getElementById("stageCardTitle"),
+  stageCardSubtitle: document.getElementById("stageCardSubtitle"),
+  dropzoneTitle: document.getElementById("dropzoneTitle"),
+  dropzoneDesc: document.getElementById("dropzoneDesc"),
   stageWrapper: document.getElementById("stageWrapper"),
   overlayToolbar: document.getElementById("overlayToolbar"),
   overlayPills: document.querySelectorAll(".btn-overlay-pill"),
@@ -159,6 +181,8 @@ const els = {
   canvasContainer: document.getElementById("canvasContainer"),
   previewCanvas: document.getElementById("previewCanvas"),
   stageControls: document.getElementById("stageControls"),
+  videoScrubberRow: document.getElementById("videoScrubberRow"),
+  playbackControlsGroup: document.getElementById("playbackControlsGroup"),
   videoScrubber: document.getElementById("videoScrubber"),
   timecodeDisplay: document.getElementById("timecodeDisplay"),
   btnPlayPause: document.getElementById("btnPlayPause"),
@@ -200,6 +224,18 @@ const els = {
   fitModeWrapper: document.getElementById("fitModeWrapper"),
   fitModeButtons: document.querySelectorAll(".btn-fit-mode"),
   fitModeLabel: document.getElementById("fitModeLabel"),
+  imageResizeCard: document.getElementById("imageResizeCard"),
+  sliderImageScale: document.getElementById("sliderImageScale"),
+  valImageScale: document.getElementById("valImageScale"),
+  imageTargetDimsBadge: document.getElementById("imageTargetDimsBadge"),
+  resizePills: document.querySelectorAll(".btn-resize-pill"),
+  imageFormatCard: document.getElementById("imageFormatCard"),
+  imageFormatBadge: document.getElementById("imageFormatBadge"),
+  formatPills: document.querySelectorAll(".btn-format-pill"),
+  imageQualitySliderWrapper: document.getElementById("imageQualitySliderWrapper"),
+  sliderImageQuality: document.getElementById("sliderImageQuality"),
+  valImageQuality: document.getElementById("valImageQuality"),
+  videoQualityCard: document.getElementById("videoQualityCard"),
   sliderCrf: document.getElementById("sliderCrf"),
   valCrf: document.getElementById("valCrf"),
   weightEstimatedValue: document.getElementById("weightEstimatedValue"),
@@ -208,6 +244,8 @@ const els = {
   weightBarFill: document.getElementById("weightBarFill"),
 
   // Pipeline Action & Console
+  pipelineCardTitle: document.getElementById("pipelineCardTitle"),
+  pipelineCardSubtitle: document.getElementById("pipelineCardSubtitle"),
   btnExportVideo: document.getElementById("btnExportVideo"),
   iconExportWasm: document.getElementById("iconExportWasm"),
   iconExportSpinner: document.getElementById("iconExportSpinner"),
@@ -229,6 +267,7 @@ const els = {
   statFpsSpeed: document.getElementById("statFpsSpeed"),
   statStage: document.getElementById("statStage"),
   successBanner: document.getElementById("successBanner"),
+  successBannerText: document.getElementById("successBannerText"),
   btnDownloadAgain: document.getElementById("btnDownloadAgain"),
   consoleHeader: document.getElementById("consoleHeader"),
   consoleBody: document.getElementById("consoleBody"),
@@ -548,9 +587,9 @@ function initEventListeners() {
   }
   els.videoFileInput.addEventListener("change", handleVideoSelect);
 
-  // Drag & Drop for Video (overlay + stage)
-  setupDropzone(els.videoDropzone, handleVideoFile);
-  setupDropzone(els.stageWrapper, handleVideoFile);
+  // Drag & Drop for Media (overlay + stage)
+  setupDropzone(els.videoDropzone, handleMediaFile);
+  setupDropzone(els.stageWrapper, handleMediaFile);
 
   // Video Scrubber & Playback Controls
   els.btnPlayPause.addEventListener("click", togglePlayPause);
@@ -702,8 +741,77 @@ function initEventListeners() {
   // Interactive WYSIWYG Canvas Pointer Events
   initCanvasPointerEvents();
 
-  // Export Action
-  els.btnExportVideo.addEventListener("click", () => startFFmpegExport());
+  // Image Resolution Scaling Slider (%)
+  if (els.sliderImageScale) {
+    els.sliderImageScale.addEventListener("input", (e) => {
+      const val = parseInt(e.target.value, 10);
+      state.imageExportSettings.scalePercent = val;
+      if (els.valImageScale) els.valImageScale.textContent = `${val}%`;
+      updateResizePillsUI(val);
+      updateTargetResolution();
+      updatePredictiveWeight();
+      renderCanvas();
+    });
+  }
+
+  // Image Resize Quick Pills
+  if (els.resizePills) {
+    els.resizePills.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const val = parseInt(btn.dataset.scale, 10);
+        state.imageExportSettings.scalePercent = val;
+        if (els.sliderImageScale) els.sliderImageScale.value = val;
+        if (els.valImageScale) els.valImageScale.textContent = `${val}%`;
+        updateResizePillsUI(val);
+        updateTargetResolution();
+        updatePredictiveWeight();
+        renderCanvas();
+      });
+    });
+  }
+
+  // Image Format Pills Selector
+  if (els.formatPills) {
+    els.formatPills.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        els.formatPills.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const fmt = btn.dataset.format;
+        state.imageExportSettings.format = fmt;
+
+        const isLossy = fmt === "jpeg" || fmt === "webp";
+        if (els.imageQualitySliderWrapper) {
+          els.imageQualitySliderWrapper.style.display = isLossy ? "flex" : "none";
+        }
+
+        let label = "Source (Qualité Max)";
+        if (fmt === "png") label = "PNG (Sans perte)";
+        else if (fmt === "jpeg") label = `JPEG (${Math.round(state.imageExportSettings.quality * 100)}%)`;
+        else if (fmt === "webp") label = `WebP (${Math.round(state.imageExportSettings.quality * 100)}%)`;
+        if (els.imageFormatBadge) els.imageFormatBadge.textContent = label;
+
+        updatePredictiveWeight();
+      });
+    });
+  }
+
+  // Image Quality Slider (JPEG & WebP)
+  if (els.sliderImageQuality) {
+    els.sliderImageQuality.addEventListener("input", (e) => {
+      const val = parseInt(e.target.value, 10);
+      state.imageExportSettings.quality = val / 100;
+      const desc = val === 100 ? "Maximale" : val >= 85 ? "Très haute" : "Compressée";
+      if (els.valImageQuality) els.valImageQuality.textContent = `${val}% (${desc})`;
+      if (els.imageFormatBadge && (state.imageExportSettings.format === "jpeg" || state.imageExportSettings.format === "webp")) {
+        const fmtName = state.imageExportSettings.format.toUpperCase();
+        els.imageFormatBadge.textContent = `${fmtName} (${val}%)`;
+      }
+      updatePredictiveWeight();
+    });
+  }
+
+  // Export Action (Adaptive Photo vs Video)
+  els.btnExportVideo.addEventListener("click", () => handleExportClick());
   els.btnDownloadAgain.addEventListener("click", () => {
     autoSaveOrDownload(state.lastExportBlob, state.lastExportFilename);
   });
@@ -718,16 +826,17 @@ function initEventListeners() {
     els.queueFileInput.addEventListener("change", (e) => {
       const files = Array.from(e.target.files || []);
       e.target.value = "";
-      enqueueVideoFiles(files);
+      enqueueMediaFiles(files);
     });
   }
   if (els.btnQueueCurrent) {
     els.btnQueueCurrent.addEventListener("click", () => {
-      if (!state.videoFile) {
-        showToast("Chargez d’abord une vidéo.");
+      const current = state.mediaType === "image" ? state.imageFile : state.videoFile;
+      if (!current) {
+        showToast("Chargez d’abord une photo ou une vidéo.");
         return;
       }
-      enqueueVideoFiles([state.videoFile]);
+      enqueueMediaFiles([current]);
     });
   }
   if (els.btnStartQueue) {
@@ -1124,8 +1233,14 @@ function setupDropzone(zoneEl, onDropFile) {
 
 function handleVideoSelect(e) {
   if (e.target.files && e.target.files[0]) {
-    handleVideoFile(e.target.files[0]);
+    handleMediaFile(e.target.files[0]);
   }
+}
+
+function isImageFile(file) {
+  if (!file) return false;
+  if (file.type && file.type.startsWith("image/")) return true;
+  return /\.(jpe?g|png|webp|gif|bmp|svg|avif|tiff?|heic|heif|ico)$/i.test(file.name || "");
 }
 
 function isVideoFile(file) {
@@ -1135,12 +1250,189 @@ function isVideoFile(file) {
   return /\.(mp4|mov|webm|mkv|m4v|avi|mpeg|mpg|ogv)$/i.test(file.name || "");
 }
 
+async function handleMediaFile(file, options = {}) {
+  if (!file) return;
+  if (isImageFile(file)) {
+    return handleImageFile(file, options);
+  } else if (isVideoFile(file)) {
+    return handleVideoFile(file, options);
+  } else {
+    showToast("Format non pris en charge. Veuillez importer une photo ou une vidéo.");
+    return Promise.reject(new Error("unsupported media format"));
+  }
+}
+
+function updateMediaTypeUI(type) {
+  const isImage = type === "image";
+  if (els.stageCardTitle) {
+    els.stageCardTitle.textContent = isImage ? "Aperçu Photo • Éditeur WYSIWYG" : "Aperçu Vidéo & Éditeur WYSIWYG";
+  }
+  if (els.stageCardSubtitle) {
+    els.stageCardSubtitle.textContent = isImage
+      ? "Positionnez, redimensionnez et orientez votre filigrane en direct"
+      : "Glissez ou touchez l'écran pour repositionner le watermark en direct";
+  }
+  if (els.videoScrubberRow) {
+    els.videoScrubberRow.style.display = isImage ? "none" : "flex";
+  }
+  if (els.playbackControlsGroup) {
+    els.playbackControlsGroup.style.display = isImage ? "none" : "flex";
+  }
+  if (els.btnChangeVideo) {
+    els.btnChangeVideo.textContent = isImage ? "Changer de photo" : "Changer de vidéo";
+  }
+  if (els.imageResizeCard) {
+    els.imageResizeCard.style.display = isImage ? "flex" : "none";
+  }
+  if (els.imageFormatCard) {
+    els.imageFormatCard.style.display = isImage ? "flex" : "none";
+  }
+  if (els.videoQualityCard) {
+    els.videoQualityCard.style.display = isImage ? "none" : "flex";
+  }
+  if (els.pipelineCardTitle) {
+    els.pipelineCardTitle.textContent = isImage ? "Export Photo HD" : "Pipeline FFmpeg & Export";
+  }
+  if (els.pipelineCardSubtitle) {
+    els.pipelineCardSubtitle.textContent = isImage
+      ? "Rendu graphique ultra-rapide 100% local sur votre navigateur"
+      : "Encodage H.264 logiciel (WebAssembly), sur votre processeur";
+  }
+  if (els.labelBtnExport) {
+    els.labelBtnExport.textContent = isImage ? "Exporter l'Image Filigranée" : "Exporter la Vidéo Filigranée";
+  }
+}
+
+function updateResizePillsUI(val) {
+  if (!els.resizePills) return;
+  els.resizePills.forEach((btn) => {
+    if (parseInt(btn.dataset.scale, 10) === val) {
+      btn.classList.add("active");
+    } else {
+      btn.classList.remove("active");
+    }
+  });
+}
+
+async function handleImageFile(file, options = {}) {
+  const silent = options.silent === true;
+  if (!isImageFile(file)) {
+    showToast("Veuillez sélectionner un fichier image valide (JPG, PNG, WEBP, AVIF, GIF, etc.).");
+    return Promise.reject(new Error("invalid image"));
+  }
+
+  // Arrêter la lecture vidéo si elle tournait
+  if (state.isPlaying) {
+    setPlayState(false);
+  }
+  if (els.sourceVideo) {
+    try {
+      els.sourceVideo.pause();
+      els.sourceVideo.currentTime = 0;
+    } catch (_) {}
+  }
+
+  state.mediaType = "image";
+  state.imageFile = file;
+  state.videoFile = null;
+
+  if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
+  state.imageUrl = URL.createObjectURL(file);
+
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  let detectedFormat = "PNG";
+  if (file.type.includes("jpeg") || ext === "jpg" || ext === "jpeg") detectedFormat = "JPEG";
+  else if (file.type.includes("png") || ext === "png") detectedFormat = "PNG";
+  else if (file.type.includes("webp") || ext === "webp") detectedFormat = "WebP";
+  else if (file.type.includes("avif") || ext === "avif") detectedFormat = "AVIF";
+  else if (file.type.includes("gif") || ext === "gif") detectedFormat = "GIF";
+  else if (file.type.includes("svg") || ext === "svg") detectedFormat = "SVG";
+  else if (file.type.includes("bmp") || ext === "bmp") detectedFormat = "BMP";
+  else if (ext) detectedFormat = ext.toUpperCase();
+
+  state.imageMeta.name = file.name.replace(/\.[^/.]+$/, "");
+  state.imageMeta.sizeBytes = file.size;
+  state.imageMeta.format = detectedFormat;
+
+  appendLog(`[Photo] Fichier chargé : ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} Mo, format ${detectedFormat})`);
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      state.imageElement = img;
+      const w = img.naturalWidth || 1920;
+      const h = img.naturalHeight || 1080;
+
+      state.imageMeta.width = w;
+      state.imageMeta.height = h;
+      state.imageMeta.aspectRatioVal = w / h;
+
+      const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+      const divisor = gcd(w, h);
+      const simplified = `${Math.round(w / divisor)}:${Math.round(h / divisor)}`;
+      state.imageMeta.aspectRatio = simplified;
+
+      // Synchroniser également videoMeta pour les helpers génériques
+      state.videoMeta.name = state.imageMeta.name;
+      state.videoMeta.width = w;
+      state.videoMeta.height = h;
+      state.videoMeta.sizeBytes = file.size;
+      state.videoMeta.duration = 0;
+      state.videoMeta.aspectRatioVal = w / h;
+      state.videoMeta.aspectRatio = simplified;
+
+      els.previewCanvas.width = w;
+      els.previewCanvas.height = h;
+
+      updateMediaTypeUI("image");
+
+      els.chipResolution.innerHTML = `<strong>${w}×${h}</strong> (${simplified})`;
+      els.chipFps.innerHTML = `<strong>Photo • ${detectedFormat}</strong>`;
+      els.chipDuration.style.display = "none";
+      els.chipSize.innerHTML = `<strong>${(file.size / (1024 * 1024)).toFixed(1)} Mo</strong>`;
+      if (els.videoMetaChips) els.videoMetaChips.style.display = "flex";
+
+      els.videoDropzone.style.display = "none";
+      els.canvasContainer.style.display = "flex";
+      els.stageControls.style.display = "flex";
+      if (els.overlayToolbar) els.overlayToolbar.style.display = "flex";
+      els.btnExportVideo.disabled = state.isEncoding;
+
+      if (state.watermarkLoaded) {
+        applyAdaptiveWatermarkScaling();
+      } else {
+        applyAnchor(state.watermarkState.anchor);
+      }
+
+      updateTargetResolution();
+      updatePredictiveWeight();
+      renderCanvas();
+
+      if (!silent) {
+        showToast(`Photo importée : ${w}×${h} px (${detectedFormat})`);
+      }
+      resolve();
+    };
+    img.onerror = (err) => {
+      showToast("Erreur lors du décodage de l'image.");
+      reject(err);
+    };
+    img.src = state.imageUrl;
+  });
+}
+
 async function handleVideoFile(file, options = {}) {
   const silent = options.silent === true;
   if (!isVideoFile(file)) {
     showToast("Veuillez sélectionner un fichier vidéo valide (MP4, MOV, WebM, MKV).");
     return Promise.reject(new Error("invalid video"));
   }
+
+  state.mediaType = "video";
+  state.imageElement = null;
+  state.imageFile = null;
+  updateMediaTypeUI("video");
+  if (els.chipDuration) els.chipDuration.style.display = "inline-flex";
 
   state.videoFile = file;
   state.videoMeta.name = file.name.replace(/\.[^/.]+$/, "");
@@ -1391,21 +1683,22 @@ async function initDefaultWatermarkFallback() {
 function applyAdaptiveWatermarkScaling() {
   if (!state.watermarkLoaded || !state.watermarkImage) return;
 
-  const videoW = state.videoMeta.width || els.previewCanvas.width || 1920;
-  const videoH = state.videoMeta.height || els.previewCanvas.height || 1080;
+  const isImage = state.mediaType === "image";
+  const mediaW = isImage ? (state.imageMeta.width || els.previewCanvas.width || 1920) : (state.videoMeta.width || els.previewCanvas.width || 1920);
+  const mediaH = isImage ? (state.imageMeta.height || els.previewCanvas.height || 1080) : (state.videoMeta.height || els.previewCanvas.height || 1080);
   const ww = state.watermarkImage.naturalWidth;
   const wh = state.watermarkImage.naturalHeight;
 
-  if (isNearExactResolution(videoW, videoH, ww, wh)) {
+  if (isNearExactResolution(mediaW, mediaH, ww, wh)) {
     applyWatermarkFullscreen(true);
     if (els.autoScaleBadge) els.autoScaleBadge.classList.add("visible");
     appendLog(
-      `[Auto-Sizing] PNG ${ww}×${wh} ≈ vidéo ${videoW}×${videoH} → plein écran étiré.`
+      `[Auto-Sizing] PNG ${ww}×${wh} ≈ média ${mediaW}×${mediaH} → plein écran étiré.`
     );
     return;
   }
 
-  const ratio = ww / videoW;
+  const ratio = ww / mediaW;
   if (ratio > 0.4 || ratio < 0.05) {
     state.watermarkState.stretchFullscreen = false;
     state.watermarkState.scaleY = null;
@@ -1414,7 +1707,7 @@ function applyAdaptiveWatermarkScaling() {
     els.valScale.textContent = "18%";
     if (els.autoScaleBadge) els.autoScaleBadge.classList.add("visible");
     appendLog(
-      `[Auto-Sizing] Ratio PNG/Vidéo ${(ratio * 100).toFixed(0)}%. Échelle à 18%.`
+      `[Auto-Sizing] Ratio PNG/Média ${(ratio * 100).toFixed(0)}%. Échelle à 18%.`
     );
   } else {
     if (els.autoScaleBadge) els.autoScaleBadge.classList.remove("visible");
@@ -1869,8 +2162,44 @@ function renderCanvas() {
   const canvas = els.previewCanvas;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // 1. Draw current video frame (supporting vertical crop and letterbox)
-  if (state.videoFile && els.sourceVideo.readyState >= 2) {
+  // 1. Draw current frame: photo or video (supporting vertical crop and letterbox)
+  if (state.mediaType === "image" && state.imageElement) {
+    const cw = canvas.width;
+    const ch = canvas.height;
+    const iw = state.imageElement.naturalWidth || state.imageMeta.width || cw;
+    const ih = state.imageElement.naturalHeight || state.imageMeta.height || ch;
+    const imgAspect = iw / ih;
+    const carAspect = cw / ch;
+
+    if (Math.abs(imgAspect - carAspect) < 0.02) {
+      // Proportions identiques
+      ctx.drawImage(state.imageElement, 0, 0, cw, ch);
+    } else if (state.exportSettings.fitMode === "crop") {
+      // Remplir tout l'écran vertical avec recadrage centré
+      let sx = 0, sy = 0, sw = iw, sh = ih;
+      if (imgAspect > carAspect) {
+        sw = ih * carAspect;
+        sx = (iw - sw) / 2;
+      } else {
+        sh = iw / carAspect;
+        sy = (ih - sh) / 2;
+      }
+      ctx.drawImage(state.imageElement, sx, sy, sw, sh, 0, 0, cw, ch);
+    } else {
+      // Ajuster avec bandes noires (Letterbox)
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, cw, ch);
+      let dx = 0, dy = 0, dw = cw, dh = ch;
+      if (imgAspect > carAspect) {
+        dh = cw / imgAspect;
+        dy = (ch - dh) / 2;
+      } else {
+        dw = ch * imgAspect;
+        dx = (cw - dw) / 2;
+      }
+      ctx.drawImage(state.imageElement, 0, 0, iw, ih, dx, dy, dw, dh);
+    }
+  } else if (state.videoFile && els.sourceVideo.readyState >= 2) {
     const cw = canvas.width;
     const ch = canvas.height;
     const vw = els.sourceVideo.videoWidth || state.videoMeta.width || cw;
@@ -2330,13 +2659,14 @@ function drawSocialOverlay(canvas, ctx, type) {
 // 12. Export Presets & Predictive Weight Calculation
 // ---------------------------------------------------------------------------
 function updateTargetResolution() {
+  const isImage = state.mediaType === "image";
   const preset = state.exportSettings.preset;
-  const origW = state.videoMeta.width || 1920;
-  const origH = state.videoMeta.height || 1080;
+  const origW = isImage ? (state.imageMeta.width || 1920) : (state.videoMeta.width || 1920);
+  const origH = isImage ? (state.imageMeta.height || 1080) : (state.videoMeta.height || 1080);
   const isPortrait = origH > origW;
 
-  let outW = origW;
-  let outH = origH;
+  let baseW = origW;
+  let baseH = origH;
   let label = "Original";
 
   switch (preset) {
@@ -2344,55 +2674,72 @@ function updateTargetResolution() {
     case "tiktok":
     case "shorts":
     case "reels":
-      outW = 1080;
-      outH = 1920;
+      baseW = 1080;
+      baseH = 1920;
       label = "9:16 Vertical (1080×1920)";
       break;
     case "portrait-4-5":
     case "insta-post":
     case "twitter":
-      outW = 1080;
-      outH = 1350;
+      baseW = 1080;
+      baseH = 1350;
       label = "4:5 Portrait (1080×1350)";
       break;
     case "square-1-1":
     case "1:1":
     case "square":
-      outW = 1080;
-      outH = 1080;
+      baseW = 1080;
+      baseH = 1080;
       label = "1:1 Carré (1080×1080)";
       break;
     case "1080p":
-      outW = isPortrait ? 1080 : 1920;
-      outH = isPortrait ? 1920 : 1080;
+      baseW = isPortrait ? 1080 : 1920;
+      baseH = isPortrait ? 1920 : 1080;
       label = "1080p FHD";
       break;
     case "720p":
-      outW = isPortrait ? 720 : 1280;
-      outH = isPortrait ? 1280 : 720;
+      baseW = isPortrait ? 720 : 1280;
+      baseH = isPortrait ? 1280 : 720;
       label = "720p HD";
       break;
     case "480p":
-      outW = isPortrait ? 480 : 854;
-      outH = isPortrait ? 854 : 480;
+      baseW = isPortrait ? 480 : 854;
+      baseH = isPortrait ? 854 : 480;
       label = "480p SD";
       break;
     case "original":
     default:
-      outW = origW;
-      outH = origH;
+      baseW = origW;
+      baseH = origH;
       label = "Original";
       break;
   }
 
-  // Ensure dimensions are divisible by 2 for H.264
-  outW = Math.round(outW / 2) * 2;
-  outH = Math.round(outH / 2) * 2;
+  let outW = baseW;
+  let outH = baseH;
+
+  // Appliquer le redimensionnement en résolution (%) si mode photo actif
+  if (isImage) {
+    const scale = (state.imageExportSettings.scalePercent || 100) / 100;
+    outW = Math.max(16, Math.round(baseW * scale));
+    outH = Math.max(16, Math.round(baseH * scale));
+  } else {
+    // Dimensions paires requises pour encodage H.264
+    outW = Math.round(outW / 2) * 2;
+    outH = Math.round(outH / 2) * 2;
+  }
 
   state.exportSettings.targetWidth = outW;
   state.exportSettings.targetHeight = outH;
 
-  els.targetResBadge.textContent = `${label} • ${outW}×${outH}`;
+  const scaleSuffix = isImage && state.imageExportSettings.scalePercent !== 100
+    ? ` (${state.imageExportSettings.scalePercent}%)`
+    : "";
+  els.targetResBadge.textContent = `${label} • ${outW}×${outH}${scaleSuffix}`;
+
+  if (els.imageTargetDimsBadge) {
+    els.imageTargetDimsBadge.textContent = `${outW} × ${outH} px (${state.imageExportSettings.scalePercent}%)`;
+  }
 
   // Afficher ou masquer le sélecteur de cadrage (Fit/Crop) selon que le ratio change
   const isDifferentRatio = Math.abs(origW / origH - outW / outH) > 0.05;
@@ -2414,6 +2761,49 @@ function updateTargetResolution() {
  * Estimated Size = ((Calculated Video Bitrate + 128 kbps audio) * Duration) / 8
  */
 function updatePredictiveWeight() {
+  if (state.mediaType === "image") {
+    const sourceBytes = (state.imageMeta && state.imageMeta.sizeBytes) || 2 * 1024 * 1024;
+    const sourceMB = sourceBytes / (1024 * 1024);
+    const targetW = state.exportSettings.targetWidth || (state.imageMeta && state.imageMeta.width) || 1920;
+    const targetH = state.exportSettings.targetHeight || (state.imageMeta && state.imageMeta.height) || 1080;
+    const totalPixels = targetW * targetH;
+
+    let bytesPerPixel = 0.5;
+    const fmt = state.imageExportSettings.format;
+    const q = state.imageExportSettings.quality ?? 1.0;
+
+    if (fmt === "png" || (fmt === "original" && state.imageMeta && state.imageMeta.format === "PNG")) {
+      bytesPerPixel = 1.2;
+    } else if (fmt === "webp" || (fmt === "original" && state.imageMeta && state.imageMeta.format === "WebP")) {
+      bytesPerPixel = 0.35 * Math.max(0.2, q);
+    } else {
+      bytesPerPixel = 0.5 * Math.max(0.2, q);
+    }
+
+    const estimatedBytes = totalPixels * bytesPerPixel;
+    const estimatedMB = Math.max(0.05, estimatedBytes / (1024 * 1024));
+
+    els.weightEstimatedValue.textContent = `~${estimatedMB.toFixed(1)} Mo`;
+    els.weightSourceCompare.textContent = `(Taille source : ${sourceMB.toFixed(1)} Mo)`;
+
+    const diffPercent = Math.round(((estimatedMB - sourceMB) / sourceMB) * 100);
+    if (diffPercent < 0) {
+      els.weightDiffBadge.textContent = `${Math.abs(diffPercent)}% d'économie`;
+      els.weightDiffBadge.style.color = "#34d399";
+      els.weightDiffBadge.style.background = "rgba(16, 185, 129, 0.15)";
+      els.weightDiffBadge.style.borderColor = "rgba(16, 185, 129, 0.3)";
+    } else {
+      els.weightDiffBadge.textContent = `+${diffPercent}% qualité max`;
+      els.weightDiffBadge.style.color = "#c084fc";
+      els.weightDiffBadge.style.background = "rgba(168, 85, 247, 0.15)";
+      els.weightDiffBadge.style.borderColor = "rgba(168, 85, 247, 0.3)";
+    }
+
+    const ratioBar = Math.min(100, Math.max(10, Math.round((estimatedMB / Math.max(estimatedMB, sourceMB)) * 100)));
+    els.weightBarFill.style.width = `${ratioBar}%`;
+    return;
+  }
+
   const durationSec = state.videoMeta.duration || 10;
   const sourceBytes = state.videoMeta.sizeBytes || 15 * 1024 * 1024;
   const sourceMB = sourceBytes / (1024 * 1024);
@@ -2688,40 +3078,49 @@ function snapshotForQueue() {
   return {
     watermarkState: JSON.parse(JSON.stringify(state.watermarkState)),
     exportSettings: JSON.parse(JSON.stringify(state.exportSettings)),
+    imageExportSettings: JSON.parse(JSON.stringify(state.imageExportSettings)),
   };
 }
 
-function enqueueVideoFiles(files) {
-  const vids = (files || []).filter(isVideoFile);
-  if (!vids.length) {
-    showToast("Aucun fichier vidéo valide.");
+function enqueueMediaFiles(files) {
+  const validFiles = (files || []).filter((f) => isImageFile(f) || isVideoFile(f));
+  if (!validFiles.length) {
+    showToast("Aucun fichier photo ou vidéo valide.");
     return;
   }
   if (!state.watermarkLoaded) {
     showToast("Importez d’abord un filigrane PNG.");
     return;
   }
-  if (state.videoFile) {
+  if (state.imageElement || state.videoFile) {
     try {
       updateTargetResolution();
     } catch (_) {}
   }
   const snap = snapshotForQueue();
   let added = 0;
-  for (const file of vids) {
+  for (const file of validFiles) {
+    const isImg = isImageFile(file);
     state.encodeQueue.push({
       id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      file: file,
       videoFile: file,
       name: file.name,
+      type: isImg ? "image" : "video",
       watermarkState: snap.watermarkState,
       exportSettings: snap.exportSettings,
+      imageExportSettings: snap.imageExportSettings,
       status: "pending",
     });
     added++;
   }
   renderQueueList();
-  showToast(`${added} vidéo${added > 1 ? "s" : ""} ajoutée${added > 1 ? "s" : ""} à la file`);
-  appendLog(`[File] +${added} - total ${state.encodeQueue.filter((j) => j.status === "pending").length} en attente`);
+  showToast(`${added} média${added > 1 ? "s" : ""} ajouté${added > 1 ? "s" : ""} à la file`);
+  appendLog(`[File] +${added} médias - total ${state.encodeQueue.filter((j) => j.status === "pending").length} en attente`);
+}
+
+function enqueueVideoFiles(files) {
+  return enqueueMediaFiles(files);
 }
 
 function renderQueueList() {
@@ -2745,11 +3144,12 @@ function renderQueueList() {
       job.status === "pending"
         ? "attente"
         : job.status === "running"
-          ? "encodage"
+          ? (job.type === "image" ? "rendu" : "encodage")
           : job.status === "error"
             ? "erreur"
             : job.status;
-    const safeName = job.name.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const typeBadge = job.type === "image" ? "[Photo] " : "[Vidéo] ";
+    const safeName = (typeBadge + job.name).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     li.innerHTML = `
       <span class="queue-item-name" title="${safeName}">${safeName}</span>
       <span class="queue-item-status">${statusLabel}</span>
@@ -2786,11 +3186,14 @@ async function processEncodeQueue() {
   state.activeQueueJobId = next.id;
   next.status = "running";
   renderQueueList();
-  appendLog(`[File] Encodage → ${next.name}`);
+  appendLog(`[File] Traitement → ${next.name} (${next.type})`);
 
   try {
     Object.assign(state.watermarkState, JSON.parse(JSON.stringify(next.watermarkState)));
     Object.assign(state.exportSettings, JSON.parse(JSON.stringify(next.exportSettings)));
+    if (next.imageExportSettings) {
+      Object.assign(state.imageExportSettings, JSON.parse(JSON.stringify(next.imageExportSettings)));
+    }
     if (els.sliderScale) {
       els.sliderScale.value = Math.round(state.watermarkState.scale * 100);
       els.valScale.textContent = `${Math.round(state.watermarkState.scale * 100)}%`;
@@ -2804,19 +3207,33 @@ async function processEncodeQueue() {
       els.valRotation.textContent = `${state.watermarkState.rotation || 0}°`;
     }
 
-    await handleVideoFile(next.videoFile, { silent: true, skipFpsDetect: true });
-    if (next.exportSettings.targetWidth > 0 && next.exportSettings.targetHeight > 0) {
-      state.exportSettings.targetWidth = next.exportSettings.targetWidth;
-      state.exportSettings.targetHeight = next.exportSettings.targetHeight;
-      if (els.previewCanvas) {
-        els.previewCanvas.width = state.exportSettings.targetWidth;
-        els.previewCanvas.height = state.exportSettings.targetHeight;
-        clampWatermarkPosition();
-        renderCanvas();
+    if (next.type === "image") {
+      await handleImageFile(next.file || next.videoFile, { silent: true });
+      if (next.exportSettings.targetWidth > 0 && next.exportSettings.targetHeight > 0) {
+        state.exportSettings.targetWidth = next.exportSettings.targetWidth;
+        state.exportSettings.targetHeight = next.exportSettings.targetHeight;
+        if (els.previewCanvas) {
+          els.previewCanvas.width = state.exportSettings.targetWidth;
+          els.previewCanvas.height = state.exportSettings.targetHeight;
+          clampWatermarkPosition();
+          renderCanvas();
+        }
       }
+      await startImageExport({ fromQueue: true, jobId: next.id });
+    } else {
+      await handleVideoFile(next.file || next.videoFile, { silent: true, skipFpsDetect: true });
+      if (next.exportSettings.targetWidth > 0 && next.exportSettings.targetHeight > 0) {
+        state.exportSettings.targetWidth = next.exportSettings.targetWidth;
+        state.exportSettings.targetHeight = next.exportSettings.targetHeight;
+        if (els.previewCanvas) {
+          els.previewCanvas.width = state.exportSettings.targetWidth;
+          els.previewCanvas.height = state.exportSettings.targetHeight;
+          clampWatermarkPosition();
+          renderCanvas();
+        }
+      }
+      await startFFmpegExport({ fromQueue: true, jobId: next.id });
     }
-
-    await startFFmpegExport({ fromQueue: true, jobId: next.id });
   } catch (err) {
     next.status = "error";
     state.queueRunning = false;
@@ -2825,6 +3242,203 @@ async function processEncodeQueue() {
     renderQueueList();
     showToast(`Erreur file : ${next.name}`);
     setTimeout(() => processEncodeQueue(), 400);
+  }
+}
+
+async function handleExportClick() {
+  if (state.mediaType === "image") {
+    await startImageExport();
+  } else {
+    await startFFmpegExport();
+  }
+}
+
+async function startImageExport(options = {}) {
+  if (!state.imageElement) {
+    showToast("Veuillez d'abord sélectionner une photo source.");
+    return;
+  }
+  if (state.isEncoding) return;
+
+  state.isEncoding = true;
+  setExportingButtonState(true, "Rendu de l'image...");
+  els.successBanner.classList.remove("visible");
+  updateProgressUI(10, "Préparation de l'image...");
+  renderQueueList();
+
+  state.encodingStartTime = Date.now();
+  startElapsedTimer();
+
+  try {
+    const outW = state.exportSettings.targetWidth || state.imageMeta.width || 1920;
+    const outH = state.exportSettings.targetHeight || state.imageMeta.height || 1080;
+    const fitMode = state.exportSettings.fitMode || "crop";
+
+    updateProgressUI(30, "Composition graphique de l'image...");
+
+    // 1. Offscreen canvas at target resolution
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = outW;
+    exportCanvas.height = outH;
+    const eCtx = exportCanvas.getContext("2d");
+    eCtx.imageSmoothingEnabled = true;
+    eCtx.imageSmoothingQuality = "high";
+
+    // 2. Draw source image
+    const iw = state.imageElement.naturalWidth || outW;
+    const ih = state.imageElement.naturalHeight || outH;
+    const imgAspect = iw / ih;
+    const outAspect = outW / outH;
+
+    if (Math.abs(imgAspect - outAspect) < 0.02) {
+      eCtx.drawImage(state.imageElement, 0, 0, outW, outH);
+    } else if (fitMode === "crop") {
+      let sx = 0, sy = 0, sw = iw, sh = ih;
+      if (imgAspect > outAspect) {
+        sw = ih * outAspect;
+        sx = (iw - sw) / 2;
+      } else {
+        sh = iw / outAspect;
+        sy = (ih - sh) / 2;
+      }
+      eCtx.drawImage(state.imageElement, sx, sy, sw, sh, 0, 0, outW, outH);
+    } else {
+      eCtx.fillStyle = "#000000";
+      eCtx.fillRect(0, 0, outW, outH);
+      let dx = 0, dy = 0, dw = outW, dh = outH;
+      if (imgAspect > outAspect) {
+        dh = outW / imgAspect;
+        dy = (outH - dh) / 2;
+      } else {
+        dw = outH * imgAspect;
+        dx = (outW - dw) / 2;
+      }
+      eCtx.drawImage(state.imageElement, 0, 0, iw, ih, dx, dy, dw, dh);
+    }
+
+    // 3. Watermark
+    updateProgressUI(60, "Incrustation du filigrane...");
+    if (state.watermarkImage) {
+      eCtx.save();
+      eCtx.globalAlpha = state.watermarkState.opacity;
+      const bounds = getWatermarkExportSize(outW, outH);
+      const cx = bounds.x + bounds.w / 2;
+      const cy = bounds.y + bounds.h / 2;
+      const rot = state.watermarkState.rotation || 0;
+      if (rot !== 0) {
+        eCtx.translate(cx, cy);
+        eCtx.rotate((rot * Math.PI) / 180);
+        eCtx.drawImage(state.watermarkImage, -bounds.w / 2, -bounds.h / 2, bounds.w, bounds.h);
+      } else {
+        eCtx.drawImage(state.watermarkImage, bounds.x, bounds.y, bounds.w, bounds.h);
+      }
+      eCtx.restore();
+    }
+
+    // 4. Burn social overlays if requested
+    if (state.exportSettings.burnOverlays && state.activeOverlay !== "none") {
+      drawSocialOverlay(eCtx, outW, outH, null, state.activeOverlay);
+    }
+
+    // 5. Export format & Quality (maximum quality default)
+    updateProgressUI(80, "Encodage au format de qualité maximale...");
+    let mime = "image/png";
+    let ext = "png";
+    let quality = undefined;
+
+    const chosenFormat = state.imageExportSettings.format;
+    const qualityVal = state.imageExportSettings.quality ?? 1.0;
+
+    if (chosenFormat === "png") {
+      mime = "image/png";
+      ext = "png";
+      quality = undefined;
+    } else if (chosenFormat === "jpeg") {
+      mime = "image/jpeg";
+      ext = "jpg";
+      quality = qualityVal;
+    } else if (chosenFormat === "webp") {
+      mime = "image/webp";
+      ext = "webp";
+      quality = qualityVal;
+    } else {
+      // "original"
+      const srcFmt = (state.imageMeta.format || "").toUpperCase();
+      if (srcFmt === "PNG") {
+        mime = "image/png";
+        ext = "png";
+        quality = undefined;
+      } else if (srcFmt === "WEBP") {
+        mime = "image/webp";
+        ext = "webp";
+        quality = qualityVal;
+      } else if (srcFmt === "JPEG" || srcFmt === "JPG") {
+        mime = "image/jpeg";
+        ext = "jpg";
+        quality = qualityVal;
+      } else {
+        mime = "image/png";
+        ext = "png";
+        quality = undefined;
+      }
+    }
+
+    const outputBlob = await new Promise((resolve, reject) => {
+      exportCanvas.toBlob(
+        (b) => {
+          if (b) resolve(b);
+          else reject(new Error("Impossible de générer le blob image"));
+        },
+        mime,
+        quality
+      );
+    });
+
+    state.lastExportBlob = outputBlob;
+    if (state.lastExportUrl) URL.revokeObjectURL(state.lastExportUrl);
+    state.lastExportUrl = URL.createObjectURL(outputBlob);
+    state.lastExportFilename = `FiLiGRA_${state.imageMeta.name}_${outW}x${outH}.${ext}`;
+
+    updateProgressUI(100, "Image exportée avec succès !");
+    els.statStage.textContent = "Terminé";
+    els.statFpsSpeed.textContent = `Résolution : ${outW}×${outH}`;
+    appendLog(
+      `[Succès Photo] Image générée : ${state.lastExportFilename} (${(outputBlob.size / (1024 * 1024)).toFixed(2)} Mo, qualité max)`
+    );
+
+    await autoSaveOrDownload(outputBlob, state.lastExportFilename);
+    const successBannerText = document.getElementById("successBannerText");
+    if (successBannerText) successBannerText.textContent = "Image exportée avec succès !";
+    els.successBanner.classList.add("visible");
+    showToast(`Photo exportée : ${outW}×${outH} px !`);
+
+    if (options.fromQueue && options.jobId) {
+      const job = state.encodeQueue.find((j) => j.id === options.jobId);
+      if (job) job.status = "done";
+    }
+  } catch (error) {
+    console.error("[Image Export Error]", error);
+    appendLog(`[Erreur Photo] ${error.message}`);
+    updateProgressUI(0, `Erreur : ${error.message}`);
+    els.statStage.textContent = "Échec";
+    showToast(`Erreur d'export photo : ${error.message}`, 5000);
+    if (options.fromQueue && options.jobId) {
+      const job = state.encodeQueue.find((j) => j.id === options.jobId);
+      if (job) job.status = "error";
+    }
+  } finally {
+    state.isEncoding = false;
+    setExportingButtonState(false);
+    stopElapsedTimer();
+    renderQueueList();
+
+    if (options.fromQueue) {
+      state.activeQueueJobId = null;
+      setTimeout(() => {
+        state.queueRunning = false;
+        processEncodeQueue();
+      }, 350);
+    }
   }
 }
 
@@ -3114,11 +3728,22 @@ function parseEncodingSpeedAndFps(logMessage) {
   }
 }
 
-function setExportingButtonState(isExporting) {
+function setExportingButtonState(isExporting, customLabel) {
   els.btnExportVideo.disabled = isExporting;
   els.iconExportWasm.style.display = isExporting ? "none" : "block";
   els.iconExportSpinner.style.display = isExporting ? "block" : "none";
-  els.labelBtnExport.textContent = isExporting ? "Encodage FFmpeg en cours..." : "Exporter la Vidéo Filigranée";
+  if (isExporting) {
+    els.labelBtnExport.textContent =
+      customLabel ||
+      (state.mediaType === "image"
+        ? "Export de l'image en cours..."
+        : "Encodage FFmpeg en cours...");
+  } else {
+    els.labelBtnExport.textContent =
+      state.mediaType === "image"
+        ? "Exporter l'Image Filigranée"
+        : "Exporter la Vidéo Filigranée";
+  }
 }
 
 function startElapsedTimer() {

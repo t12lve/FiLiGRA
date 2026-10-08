@@ -4,6 +4,19 @@ Toutes les évolutions notables du projet **FiLiGRA** sont consignées dans ce f
 
 ---
 
+## [v1.4.0] - 2026-10-08
+
+### 📸 Support Complet des Photos & Redimensionnement en Résolution (%)
+- **Traitement Intégral des Photos** : Importation de photos et images dans tous les formats communs (JPG, JPEG, PNG, WebP, AVIF, GIF, SVG, BMP, TIFF, HEIC/HEIF).
+- **Export Qualité Maximale par Défaut** : Lors de l'import d'une image, l'export est automatiquement calibré à la qualité maximale (100% / sans perte).
+- **Sélecteur de Format & Qualité Image** : Choix du format de sortie (Conserver Source, PNG sans perte, JPEG 100% max, WebP 100% max) et curseur de qualité fin.
+- **Redimensionnement en Résolution (%)** : Contrôle dédié permettant d'ajuster l'échelle de résolution de l'image de sortie de 10% à 200% (boutons rapides 25%, 50%, 75%, 100%, 150%, 200%) avec calcul en temps réel des dimensions en pixels.
+- **Pipeline Image HD Instantané** : Composition 2D Canvas haute fidélité ultra-rapide 100% locale, sans latence ni perte de qualité.
+- **File d'Attente Mixte Photos & Vidéos** : Possibilité de charger par lot des photos et vidéos pour un traitement en chaîne avec sauvegarde automatique.
+- **UI Dynamique et Adaptative** : L'interface s'adapte automatiquement selon que le média chargé est une photo ou une vidéo (titres, puces d'informations, contrôles de timeline, estimations de poids).
+
+---
+
 ## [v1.3.1] - 2026-09-20
 
 ### 🚀 PWA, Compatibilité & Correctifs

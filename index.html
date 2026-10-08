@@ -22,11 +22,11 @@
       }
     } catch (e) {}
   </script>
-  <title>FiLiGRA - Watermark & Transcode Studio (PWA)</title>
+  <title>FiLiGRA - Watermark & Transcode Studio (Vidéo & Photo PWA)</title>
   
   <!-- SEO & Search Engine Optimization -->
-  <meta name="description" content="FiLiGRA - Progressive Web App client-side d'incrustation de filigrane, détection de zones sûres pour TikTok, Reels, Shorts et encodage vidéo MP4 H.264 via WebAssembly sans aucun serveur.">
-  <meta name="keywords" content="FiLiGRA, watermark, filigrane vidéo, transcodage, WebAssembly, FFmpeg wasm, safe zone tiktok, reels instagram, youtube shorts, PWA, privacy-first, T12lve">
+  <meta name="description" content="FiLiGRA - Progressive Web App client-side d'incrustation de filigrane, détection de zones sûres pour TikTok, Reels, Shorts et encodage vidéo & photo haute fidélité via WebAssembly et Canvas sans aucun serveur.">
+  <meta name="keywords" content="FiLiGRA, watermark, filigrane vidéo, filigrane photo, resize image, transcodage, WebAssembly, FFmpeg wasm, safe zone tiktok, reels instagram, youtube shorts, PWA, privacy-first, T12lve">
   <meta name="author" content="T12lve">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://t12lve.github.io/FiLiGRA/">
@@ -84,7 +84,7 @@
   <link rel="apple-touch-icon" href="ico.png">
 
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=1.3.1">
+  <link rel="stylesheet" href="style.css?v=1.4.0">
 
   <!-- FFmpeg.wasm & Util CDN Imports -->
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
@@ -123,8 +123,8 @@
               </svg>
             </div>
             <div>
-              <h2 class="card-title">Aperçu Vidéo & Éditeur WYSIWYG</h2>
-              <p class="card-subtitle">Glissez ou touchez l'écran pour repositionner le watermark en direct</p>
+              <h2 class="card-title" id="stageCardTitle">Aperçu Média & Éditeur WYSIWYG</h2>
+              <p class="card-subtitle" id="stageCardSubtitle">Glissez ou touchez l'écran pour repositionner le watermark en direct</p>
             </div>
           </div>
           <div class="video-meta-tags" id="videoMetaChips" style="display: none;">
@@ -166,15 +166,15 @@
               </svg>
             </div>
             <div class="dropzone-text">
-              <h3>Glissez-déposez votre vidéo ici</h3>
-              <p>Prend en charge MP4, MOV, WebM, MKV jusqu'en 4K</p>
+              <h3 id="dropzoneTitle">Glissez-déposez votre vidéo ou photo ici</h3>
+              <p id="dropzoneDesc">Photos (JPG, PNG, WEBP, AVIF, GIF, SVG, BMP) & Vidéos (MP4, MOV, WebM, MKV) jusqu'en 4K/8K</p>
               <button type="button" class="btn-browse" id="btnBrowseVideo">Parcourir les fichiers</button>
             </div>
           </div>
 
           <!-- Hidden HTML5 Video element for decoding frames -->
           <video id="sourceVideo" playsinline preload="auto" crossorigin="anonymous"></video>
-          <input type="file" id="videoFileInput" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" style="display: none;">
+          <input type="file" id="videoFileInput" accept="video/*,image/*,.mp4,.mov,.webm,.mkv,.m4v,.avi,.jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,.avif,.tiff,.tif,.heic,.heif" style="display: none;">
 
           <!-- Interactive WYSIWYG Canvas -->
           <div class="canvas-container" id="canvasContainer" style="display: none;">
@@ -184,7 +184,7 @@
 
         <!-- Stage Timeline Scrubber & Controls -->
         <div class="stage-controls" id="stageControls" style="display: none;">
-          <div class="scrubber-row">
+          <div class="scrubber-row" id="videoScrubberRow">
             <div class="scrubber-slider-wrapper">
               <input type="range" id="videoScrubber" min="0" max="100" step="0.05" value="0" aria-label="Curseur temporel de la vidéo">
             </div>
@@ -192,7 +192,7 @@
           </div>
 
           <div class="playback-buttons">
-            <div class="playback-controls-group">
+            <div class="playback-controls-group" id="playbackControlsGroup">
               <button type="button" class="btn-ctrl" id="btnStepBack" title="Reculer d'une frame (-1s)" aria-label="Reculer d'une frame">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="11 19 2 12 11 5"/><polyline points="22 19 13 12 22 5"/></svg>
                 -1s
@@ -213,8 +213,8 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                 Centrer
               </button>
-              <button type="button" class="btn-ctrl" id="btnChangeVideo" title="Remplacer la vidéo source">
-                Changer de vidéo
+              <button type="button" class="btn-ctrl" id="btnChangeVideo" title="Remplacer le média source">
+                Changer de média
               </button>
             </div>
           </div>
@@ -494,10 +494,58 @@
             </div>
           </div>
 
-          <!-- Quality CRF Slider -->
-          <div class="quality-card">
+          <!-- Image Resolution Scale (%) Control (Active in Photo mode) -->
+          <div class="image-resize-card" id="imageResizeCard" style="display: none;">
             <div class="slider-header">
-              <span style="font-weight: 600; color: var(--text-lavender);">Facteur de Qualité (CRF)</span>
+              <div class="resize-title-group">
+                <span style="font-weight: 600; color: var(--accent-cyan);">Redimensionnement Image (%)</span>
+                <span class="resize-target-dims" id="imageTargetDimsBadge">100% (Originale)</span>
+              </div>
+              <span class="slider-value" id="valImageScale">100%</span>
+            </div>
+            <input type="range" id="sliderImageScale" min="10" max="200" step="1" value="100" aria-label="Redimensionnement de l'image en pourcentage">
+            <div class="resize-pills">
+              <button type="button" class="btn-resize-pill" data-scale="25">25%</button>
+              <button type="button" class="btn-resize-pill" data-scale="50">50%</button>
+              <button type="button" class="btn-resize-pill" data-scale="75">75%</button>
+              <button type="button" class="btn-resize-pill active" data-scale="100">100%</button>
+              <button type="button" class="btn-resize-pill" data-scale="150">150%</button>
+              <button type="button" class="btn-resize-pill" data-scale="200">200%</button>
+            </div>
+          </div>
+
+          <!-- Image Export Format & Quality Control (Active in Photo mode) -->
+          <div class="image-format-card" id="imageFormatCard" style="display: none;">
+            <div class="control-group-title">
+              <span>Format d'Export Image</span>
+              <span id="imageFormatBadge" style="color: var(--accent-cyan); font-family: var(--font-mono); font-size: 0.74rem;">Source (Qualité Max)</span>
+            </div>
+            <div class="format-pills-grid">
+              <button type="button" class="btn-format-pill active" data-format="original" title="Conserver le format d'origine (PNG sans perte, JPEG/WebP max)">Conserver Source</button>
+              <button type="button" class="btn-format-pill" data-format="png" title="PNG sans perte (Lossless) - Idéal pour préserver la netteté absolue">PNG (Sans perte)</button>
+              <button type="button" class="btn-format-pill" data-format="jpeg" title="JPEG haute fidélité (Qualité 100% par défaut)">JPEG (100% Max)</button>
+              <button type="button" class="btn-format-pill" data-format="webp" title="WebP moderne et compressé sans artefact">WebP (100% Max)</button>
+            </div>
+
+            <!-- Image Quality Slider (JPEG & WebP) -->
+            <div class="image-quality-slider-wrapper" id="imageQualitySliderWrapper" style="display: none; margin-top: 10px;">
+              <div class="slider-header">
+                <span style="font-size: 0.78rem; color: var(--text-secondary);">Qualité de compression</span>
+                <span class="slider-value" id="valImageQuality">100% (Maximale)</span>
+              </div>
+              <input type="range" id="sliderImageQuality" min="10" max="100" step="1" value="100" aria-label="Curseur qualité d'image">
+              <div class="quality-labels">
+                <span>50% - Réduit</span>
+                <span>85% - Très haute</span>
+                <span>100% - Maximale</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Quality CRF Slider (Active in Video mode) -->
+          <div class="quality-card" id="videoQualityCard">
+            <div class="slider-header">
+              <span style="font-weight: 600; color: var(--text-lavender);">Facteur de Qualité Vidéo (CRF)</span>
               <span class="slider-value" id="valCrf">23 (Équilibré)</span>
             </div>
             <input type="range" id="sliderCrf" min="18" max="32" step="1" value="23" aria-label="Curseur CRF de compression">
@@ -547,8 +595,8 @@
               </svg>
             </div>
             <div>
-              <h2 class="card-title">Pipeline FFmpeg & Export</h2>
-              <p class="card-subtitle">Encodage H.264 logiciel (WebAssembly), sur votre processeur</p>
+              <h2 class="card-title" id="pipelineCardTitle">Pipeline & Export</h2>
+              <p class="card-subtitle" id="pipelineCardSubtitle">Encodage vidéo ou rendu photo HD 100% local sur votre processeur</p>
             </div>
           </div>
         </div>
@@ -565,7 +613,7 @@
               <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25"/>
               <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor"/>
             </svg>
-            <span id="labelBtnExport">Exporter la Vidéo Filigranée</span>
+            <span id="labelBtnExport">Exporter le Média Filigrané</span>
           </button>
 
           <!-- Encode queue + silent auto-save folder -->
@@ -573,17 +621,17 @@
             <div class="queue-panel-header">
               <div>
                 <h3 class="queue-panel-title">File d’attente</h3>
-                <p class="queue-panel-desc">Enchaîne plusieurs vidéos avec le filigrane actuel</p>
+                <p class="queue-panel-desc">Enchaîne plusieurs photos ou vidéos avec le filigrane actuel</p>
               </div>
               <span class="queue-count-badge" id="queueCountBadge">0</span>
             </div>
             <div class="queue-actions">
-              <input type="file" id="queueFileInput" accept="video/*,.mp4,.mov,.webm,.mkv,.m4v" multiple hidden>
-              <button type="button" class="btn-queue-secondary" id="btnAddToQueue" title="Ajouter des vidéos à encoder à la suite">
-                + Vidéos
+              <input type="file" id="queueFileInput" accept="video/*,image/*,.mp4,.mov,.webm,.mkv,.m4v,.avi,.jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,.avif,.tiff,.tif,.heic,.heif" multiple hidden>
+              <button type="button" class="btn-queue-secondary" id="btnAddToQueue" title="Ajouter des médias à traiter à la suite">
+                + Médias
               </button>
-              <button type="button" class="btn-queue-secondary" id="btnQueueCurrent" title="Ajouter la vidéo chargée à la file">
-                + Actuelle
+              <button type="button" class="btn-queue-secondary" id="btnQueueCurrent" title="Ajouter le média chargé à la file">
+                + Actuel
               </button>
               <button type="button" class="btn-queue-primary" id="btnStartQueue" disabled>
                 Lancer la file
@@ -598,7 +646,7 @@
               </button>
               <span class="queue-folder-label" id="exportDirLabel">Téléchargement navigateur</span>
             </div>
-            <ul class="queue-list" id="queueList" aria-label="Vidéos en file d’attente"></ul>
+            <ul class="queue-list" id="queueList" aria-label="Médias en file d’attente"></ul>
           </div>
 
           <!-- Progress Card -->
@@ -606,7 +654,7 @@
             <div class="progress-header">
               <span class="progress-status-text" id="progressStatusText">
                 <span class="indicator-dot" id="progressDot"></span>
-                En attente d'une vidéo
+                En attente d'un média
               </span>
               <span class="progress-percentage" id="progressPercent">0%</span>
             </div>
@@ -627,7 +675,7 @@
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                 <polyline points="22 4 12 14.01 9 11.01"/>
               </svg>
-              <span>Vidéo encodée avec succès !</span>
+              <span id="successBannerText">Média exporté avec succès !</span>
             </div>
             <div class="success-actions">
               <button type="button" class="btn-share-video" id="btnShareVideo" hidden title="Partager ou enregistrer directement dans l’application Photos">
@@ -929,6 +977,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=1.3.1"></script>
+  <script type="module" src="app.js?v=1.4.0"></script>
 </body>
 </html>

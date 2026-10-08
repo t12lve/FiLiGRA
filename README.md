@@ -4,7 +4,7 @@
 
 ![FiLiGRA Banner](filigra_logo.png)
 
-**Studio vidéo 100% Client-Side WebAssembly (PWA) - Aucun serveur, confidentialité totale.**
+**Studio vidéo & photo 100% Client-Side WebAssembly (PWA) - Aucun serveur, confidentialité totale.**
 
 [![WebAssembly](https://img.shields.io/badge/WebAssembly-FFmpeg.wasm_v0.12-00F5FF?style=for-the-badge&logo=webassembly&logoColor=black)](https://ffmpegwasm.netlify.app/)
 [![PWA Ready](https://img.shields.io/badge/PWA-Installable-BF5FFF?style=for-the-badge&logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
@@ -17,9 +17,9 @@
 
 ## ⚡ Présentation
 
-**FiLiGRA** est une Progressive Web App (PWA) de niveau professionnel permettant d'incruster interactivement des filigranes graphiques (logos, signatures, overlays) et de transcoder des vidéos directement dans votre navigateur web.
+**FiLiGRA** est une Progressive Web App (PWA) de niveau professionnel permettant d'incruster interactivement des filigranes graphiques (logos, signatures, overlays) et de transcoder des vidéos et des photos directement dans votre navigateur web.
 
-Conçu selon la philosophie **Zero-Backend**, l'intégralité du traitement vidéo (décodage, composition graphique Canvas 2D, réencodage matériel H.264 et compression audio AAC) est exécuté localement sur votre processeur via **WebAssembly (`FFmpeg.wasm`)**. 
+Conçu selon la philosophie **Zero-Backend**, l'intégralité du traitement (composition graphique Canvas 2D haute fidélité, redimensionnement en résolution %, réencodage matériel H.264 et compression audio AAC) est exécuté localement sur votre processeur via **WebAssembly (`FFmpeg.wasm`)** et l'API Canvas HTML5. 
 
 Aucune vidéo, image ou donnée personnelle ne transite jamais par un serveur externe.
 

@@ -1323,6 +1323,110 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: none;
 }
 
+/* Image Resolution Scaling & Format Cards */
+.image-resize-card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  border: 1px solid var(--line-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeInDown 0.2s ease-out;
+}
+
+.resize-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resize-target-dims {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--accent-cyan);
+}
+
+.resize-pills {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.btn-resize-pill {
+  padding: 6px 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-well);
+  border: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: var(--tr-fast);
+}
+
+.btn-resize-pill:hover {
+  color: var(--text-pure);
+  border-color: var(--line-strong);
+}
+
+.btn-resize-pill.active {
+  background: var(--accent-cyan);
+  color: #04202a;
+  border-color: var(--accent-cyan);
+  font-weight: 700;
+}
+
+.image-format-card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  border: 1px solid var(--line-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeInDown 0.2s ease-out;
+}
+
+.format-pills-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.btn-format-pill {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-well);
+  border: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: var(--tr-fast);
+}
+
+.btn-format-pill:hover {
+  color: var(--text-pure);
+  border-color: var(--line-strong);
+}
+
+.btn-format-pill.active {
+  background: var(--bg-surface-elevated);
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.image-quality-slider-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
 /* Quality CRF Segment */
 .quality-card {
   padding: 14px;
